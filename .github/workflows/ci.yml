@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的旧运行在新提交到达时取消，避免排队浪费。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# ---------------------------------------------------------------------------
+# 本 workflow 只检出 insula 一个仓库。
+#
+# 曾经的布局是「两次 checkout」（把 metaRobin/cordis 检出到兄弟目录），
+# 那是 `replace cordis => ../cordis` 的代价。既然依赖改成 go.mod 里
+# `require github.com/metaRobin/cordis v0.1.0`，cordis 就由模块代理提供，
+# 兄弟目录不再需要，也不再允许回来（见下面 module declaration 那一步）。
+#
+# 前置条件：cordis 上必须有对应的 tag（v0.1.0）。tag 不存在时 `go build`
+# 会在 `missing go.sum entry` 上失败——这是正确行为，不是 CI 的缺陷。
+# ---------------------------------------------------------------------------
+
+jobs:
+  test:
+    name: Go ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.22.x 是 go.mod 声明的最低版本（支持下限必须实测）；
+        # stable 覆盖最新工具链，防止只在旧版本上通过。
+        go: ["1.22.x", "stable"]
+    env:
+      # 禁止自动切换工具链，确保矩阵中的版本就是实际运行的版本。
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v7
+
+      # 整个依赖图只有一个模块（cordis，zip 不到 80 KB），缓存收益接近零；
+      # 而开启缓存会要求 setup-go 找到 go.sum 才能工作。保持关闭。
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      # 把「依赖是代理上的那个已发布版本」这条结构性质变成硬失败。
+      #
+      # replace 只在主模块生效：写在这里会被所有下游静默忽略（看起来有用，
+      # 实际不生效），同时弄坏 go install ……@latest。这类指令在评审里很容易
+      # 被当成无害的本地便利，所以本仓库不允许它存在。
+      #
+      # 版本这一条要分成两问。第一问「有没有写版本号」是不够的：伪版本
+      # （v0.0.0-20260926143441-f4f1fd63a8b2）也以 v0 开头，能骗过一条
+      # `v[0-9]` 断言，而它恰恰表示**没有 tag**——依赖因此指向一个会移动的
+      # 提交。伪版本的形状是固定的（`-<14 位时间戳>-<12 位提交短哈希>`），
+      # 所以第二问按形状显式拒绝它。
+      - name: module declaration assertions
+        run: |
+          set -e
+          fail() { echo "::error::$1"; exit 1; }
+
+          grep -qx 'module github.com/metaRobin/insula' go.mod \
+            || fail "go.mod must declare the full domain module path github.com/metaRobin/insula"
+
+          if grep -nE '^\s*replace|=>' go.mod; then
+            fail "go.mod must not contain a replace directive; depend on the published cordis version instead (see AGENTS.md)"
+          fi
+
+          grep -qE '^require github\.com/metaRobin/cordis v[0-9]+\.[0-9]+\.[0-9]+' go.mod \
+            || fail "go.mod must require a semantic version of github.com/metaRobin/cordis"
+
+          if grep -nE '^require github\.com/metaRobin/cordis v[0-9]+\.[0-9]+\.[0-9]+-[0-9]{14}-[0-9a-f]{12}' go.mod; then
+            fail "go.mod pins a pseudo-version, which means cordis is not tagged; tag cordis and depend on the release"
+          fi
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt required for the following files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      # 竞态检测是常态检查项：cordis 的正确性依赖单 goroutine 免锁模型，
+      # insula 的共享单例与分片池则是并发的——两端都只在 -race 下暴露越界访问。
+      - name: go test -race
+        run: go test -race -count=1 ./...
+
+      # 端到端冒烟：在真实回环监听器上走完装配、请求、工具调用、身份剥离、
+      # 能力快照、隔离自检、指标、审计、停机九条路径。
+      - name: end-to-end smoke test
+        run: go run ./cmd/insula demo
+
+      # 安全面单独点名跑一遍。
+      #
+      # 这些测试混在全量测试里也会跑到，所以这一步的目的不是「多跑」，
+      # 而是把「哪些测试构成安全面」写成一份**签入的模式**：删掉其中一条
+      # 或把它改名，都会在 workflow 的 diff 里出现，是一个需要被评审的动作，
+      # 而不是一次静默删除。实测该模式命中 50 条、覆盖 17 个包。
+      - name: security-surface assertions
+        run: |
+          go test -race -count=1 -run 'Ident|Isolat|Breach|SelfCheck|Forced|Smuggl|Forged|Foreign|Leak|Redact|Strip|Namespace|FailClosed' ./...
+
+  bench:
+    name: Benchmarks (compile + gross regression)
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+
+      # 这一步的目的**不是取数**，而是两件事：
+      #   1) 基准能被编译（性能门禁不能悄悄坏掉）；
+      #   2) 跨规模曲线不出现断言式失败（如规模测试里的长度断言被破坏）。
+      # 真要比较数字，必须按 BENCHMARK.md 的纪律在本机单独跑包 + -cpu 1，
+      # 并且两边用相同的 -benchtime 与 -count。CI runner 是共享且抖动的，
+      # 它的数字不能用来判断回归。
+      - name: benchmarks
+        run: go test -run '^$' -bench . -benchmem -benchtime 3x -count 1 -timeout 30m ./...

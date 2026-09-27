@@ -1,32 +1,28 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
+# 编辑器 / 系统
+.DS_Store
+.workbuddy/
+
+# 构建产物
+/insula
+/dist/
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binary, built with `go test -c`
+# 测试与覆盖率产物
 *.test
-
-# Code coverage profiles and other test artifacts
 *.out
 coverage.*
 *.coverprofile
 profile.cov
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
-go.work
-go.work.sum
-
-# env file
+# 本地环境
 .env
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# go.work 按本项目约定放在两条仓库**之上**（见 README「作为依赖使用」与 AGENTS.md）。
+# 它记录的是本地绝对路径，而且一旦提交进仓库根，CI 里的 go build 会试图使用一个
+# 指向不存在目录的 workspace —— 构建直接失败。所以这里忽略它。
+go.work
+go.work.sum
