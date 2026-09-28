@@ -62,9 +62,19 @@ cordis 对它们中的任何一条都没有意见。
 `Isolate` 只接受 `true`。字符串标签就是共享域——一条跨租户共享服务的后门。除非有明确的、
 经过评审的共享服务需求，这个能力就是不给。
 
-落实：`realm.Tenant()` 与 `realm.Session()` 是全平台**仅有的**两处会写出 `Isolate`
-字面量的地方，且都硬编码 `true`。分片自检用 `realm.SharedRealmLabel` 断言租户子树里
-不存在任何字符串形式的声明。
+落实（主）：`realm.Tenant()` 与 `realm.Session()` 是全平台**仅有的**两处会写出 `Isolate`
+字面量的地方，且都硬编码 `true`。这条规则**由构造保证**，不靠事后检查——`realm` 的包注释与
+`TestTenantIsolateCoversEveryService` 就是为它存在的。
+
+落实（辅）：只有构造还不够。手工建的入口仍可能把标签塞进来，而 `cordis` 会静默照办
+（字符串变成 `@标签` 共享域；`false` 把该入口挪出外层域；其它类型被读成"未声明"）。
+因此还有一层运行时检查：`realm.CheckIsolateDeclarations` 遍历租户整棵入口子树，
+拒绝**任何**不是字面 `true` 的 `Isolate` 值。`shard.Pool.SelfCheck` 对每个租户跑一遍，
+把扫过的声明条数报成 `SelfCheckReport.Declarations`，失败时在指标里记一次隔离破坏。
+
+那个计数不是装饰：没有它，「声明层跑了且干净」与「声明层根本没跑」在报告里完全同形，
+而这两件事的含义正相反。`realm.SharedRealmLabel` 是更窄的谓词（只问"这个值是不是字符串
+标签"），留给只关心这个问题的调用方；执行点用的是更严的规则。
 
 ### R4 · 跨租户资源必须走显式的平台级服务
 

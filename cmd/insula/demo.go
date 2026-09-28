@@ -145,10 +145,16 @@ func runDemo(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("自检: %w", err)
 	}
-	fmt.Fprintf(stdout, "  分片 %d，参与租户 %d，比较对数 %d，穷尽=%v\n",
-		report.Shards, report.Tenants, report.PairsChecked, report.Exhaustive)
+	fmt.Fprintf(stdout, "  分片 %d，参与租户 %d，比较对数 %d，声明 %d 条，穷尽=%v\n",
+		report.Shards, report.Tenants, report.PairsChecked, report.Declarations, report.Exhaustive)
 	if report.Tenants < len(devTenantIDs) {
 		return fmt.Errorf("自检只覆盖了 %d 个租户，期望至少 %d 个", report.Tenants, len(devTenantIDs))
+	}
+	// 声明层的计数**没有**下面第 7 步那个缺口：它随**租户**走，不随
+	// 租户对走，只要有一个开通了的租户就必然非零。因此这里可以直接
+	// 把它当成硬断言——0 一定是"声明层没跑"。
+	if report.Declarations == 0 {
+		return fmt.Errorf("有 %d 个租户却一条 Isolate 声明都没扫到：声明层没有跑", report.Tenants)
 	}
 
 	// ---- 7) 指标 ----
@@ -181,6 +187,10 @@ func runDemo(args []string, stdout, stderr io.Writer) error {
 	default:
 		fmt.Fprintf(stdout, "  ✓ 比过 %d 对租户，计数非零 —— 「查过且干净」可被监控分辨\n", report.PairsChecked)
 	}
+	// 声明层是同一类哨兵，但它**没有**上面那个缺口：条数随租户走，
+	// 因此「查过且干净」与「没查」在它这里天然可分辨（第 6 步已硬断言）。
+	fmt.Fprintf(stdout, "  ✓ 另扫过 %d 条 Isolate 声明（随租户走，不随租户对走，故无上述缺口）\n",
+		report.Declarations)
 	families := metricFamilies(render)
 	fmt.Fprintf(stdout, "  完整的 %d 个指标族可从 serve -admin /metrics 取：\n", len(families))
 	fmt.Fprintf(stdout, "    %s\n", strings.Join(families, " "))

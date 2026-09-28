@@ -919,6 +919,30 @@ func (m *Manager) IsolationCheck(a, b ident.Tenant) error {
 	return nil
 }
 
+// CheckIsolateDeclarations 扫描某租户整棵入口子树的 Isolate 声明，
+// 断言没有任何一条是共享域标签或 false。
+//
+// 与 IsolationCheck 的分工是**互补的**，两个都要跑：
+//
+//   - IsolationCheck 比两个租户的**解析结果**，因此对「这个服务名没进
+//     realm.Services()」是瞎的——而漏声明正是静默共享的典型形态；
+//   - 本方法看**声明本身**，与服务是否注册无关，任何一条写错的值
+//     都跑不掉，包括写在平台清单之外的服务名上的。
+//
+// 返回扫过的声明条数；调用方要把它报出去，否则「查过且干净」与
+// 「什么都没查」在报告里无法分辨。
+func (m *Manager) CheckIsolateDeclarations(t ident.Tenant) (int, error) {
+	entryID, ok := m.ResolveEntry(t)
+	if !ok {
+		return 0, fmt.Errorf("%w: %s", ErrNoTenant, t)
+	}
+	entry, err := m.d.Loader.Tree().Resolve(entryID)
+	if err != nil {
+		return 0, fmt.Errorf("insula/tenant: resolve subtree of %s (%s): %w", t, entryID, err)
+	}
+	return realm.CheckIsolateDeclarations(entry)
+}
+
 func (m *Manager) audit(e audit.Event) {
 	if m.d.Audit != nil {
 		m.d.Audit.Record(e)

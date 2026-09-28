@@ -134,6 +134,15 @@ absent from the `Workspace` interface the edge layer holds, so "an HTTP handler
 that deprovisions a tenant" is a compile error rather than a code-review item.
 Prefer widening an interface over adding a runtime check.
 
+This does **not** mean "no runtime checks". Some things the type system cannot
+reach: `cordis` accepts `EntryOptions.Isolate` as `map[string]any`, so a shared
+realm label (`"@shared"`) is expressible even though the platform never emits
+one — and `cordis` honours it silently. The answer there is a **sentinel**, not
+a guarantee: `shard.Pool.SelfCheck` is the designated place where construction
+breakage is caught (see SAFETY.md R3), and a sentinel must report what it
+scanned — `SelfCheckReport.PairsChecked` and `.Declarations` — so that "ran and
+was clean" cannot be confused with "did not run".
+
 ## Testing discipline
 
 - **A fix for a semantic bug needs a regression test, and you must verify the

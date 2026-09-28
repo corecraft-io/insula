@@ -77,10 +77,26 @@ this one), `gateway`.
 cross-tenant service sharing. Unless there is an explicit, reviewed requirement
 for a shared service, the capability is simply not granted.
 
-Enforcement: `realm.Tenant()` and `realm.Session()` are the only places in the
-platform that emit `Isolate` literals, and both hard-code `true`. The shard
-self-check uses `realm.SharedRealmLabel` to assert that no declaration anywhere
-in a tenant's subtree is a string.
+Enforcement, primary: `realm.Tenant()` and `realm.Session()` are the only places
+in the platform that emit `Isolate` literals, and both hard-code `true`. The
+rule holds **by construction**, not by inspection — that is what
+`realm`'s package comment and `TestTenantIsolateCoversEveryService` are for.
+
+Enforcement, secondary: construction is not enough on its own, because a
+hand-built entry could still slip a label in and `cordis` would honour it
+silently (a string becomes a `@label` shared realm; `false` drops the entry out
+of the enclosing realm; any other type reads as "no declaration"). So there is
+a runtime layer: `realm.CheckIsolateDeclarations` walks a tenant's whole entry
+subtree and rejects **any** `Isolate` value that is not literally `true`.
+`shard.Pool.SelfCheck` runs it for every tenant, reports the number of
+declarations scanned as `SelfCheckReport.Declarations`, and records a breach in
+the metrics on failure.
+
+That count is not decoration: without it, "the declaration layer ran and was
+clean" and "the declaration layer never ran" are identical in the report, and
+those two mean opposite things. `realm.SharedRealmLabel` is the narrower
+predicate (`is this value a string label?`) kept for callers that only care
+about that question; the enforcement uses the stricter rule.
 
 ### R4 · Cross-tenant resources must be explicit platform services
 

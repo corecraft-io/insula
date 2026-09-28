@@ -309,6 +309,25 @@ func (s *Shard) selfCheck(pairs int) (checked int, err error) {
 	return checked, nil
 }
 
+// declarationCheck 扫本片全部租户子树里的 Isolate 声明。
+//
+// 成本是 O(子树)，与租户数成正比、与租户对**无关**——因此它不参与
+// SelfCheckPairs 的抽检预算：一个探针在一个租户上就够，不需要配对。
+// 计数失败路径同样记一次隔离破坏：一条共享域声明就是一次隔离失效，
+// 不该只出现在日志里而为指标所无。
+func (s *Shard) declarationCheck() (int, error) {
+	total := 0
+	for _, id := range s.tenants.List() {
+		n, err := s.tenants.CheckIsolateDeclarations(id)
+		total += n
+		if err != nil {
+			s.noteIsolation(false, id)
+			return total, fmt.Errorf("shard %d: %w", s.id, err)
+		}
+	}
+	return total, nil
+}
+
 // ---------------------------------------------------------------------------
 // Pool
 // ---------------------------------------------------------------------------
@@ -531,6 +550,12 @@ type SelfCheckReport struct {
 	// Exhaustive 为 true 表示抽检预算足以覆盖全部分片内的所有租户对，
 	// 因此这次自检是穷尽的而不是抽样的。
 	Exhaustive bool
+	// Declarations 是实际扫过的 Isolate 声明条数（逐租户子树）。
+	//
+	// 与 PairsChecked 同一条纪律：报出来是为了让「查过且干净」可被
+	// 监控分辨。一个恒为 0 的 Declarations 配着「自检通过」的结论，
+	// 说明声明层根本没跑，而不是说明声明层是干净的。
+	Declarations int
 }
 
 // SelfCheck 做一次隔离自检。
@@ -551,6 +576,16 @@ type SelfCheckReport struct {
 //
 // 想让覆盖变穷尽就把 Config.SelfCheckPairs 调大（或设一个大于
 // N(N-1)/2 的值），报告里的 Exhaustive 会告诉你这次到底覆没覆盖全。
+//
+// # 两层，看的东西不同
+//
+//   - **两两比对**（`PairsChecked`）：两个租户解析到的**实例**是不是同一个。
+//     受抽检预算 `SelfCheckPairs` 限制。
+//   - **声明扫描**（`Declarations`）：每条 `Isolate` 声明**写的是什么值**。
+//     逐租户 O(子树)，不参与抽检预算，因此永远是穷尽的。
+//
+// 两者互补而非重复：前者对「服务名没进 realm.Services()」是瞎的，
+// 而那正是漏声明导致静默共享的形态。见 SAFETY.md R3 与 ADR-0003。
 func (p *Pool) SelfCheck() (SelfCheckReport, error) {
 	rep := SelfCheckReport{Shards: len(p.shards), Exhaustive: true}
 	if p.isClosed() {
@@ -575,6 +610,23 @@ func (p *Pool) SelfCheck() (SelfCheckReport, error) {
 		rep.Exhaustive = false
 	}
 	p.checked.Add(int64(rep.PairsChecked))
+
+	// 第二层：声明扫描。它与上面的两两比对看的是**不同的东西**，
+	// 因此不是重复劳动——
+	//
+	//   - 两两比对比的是「两个租户解析到的实例是否相同」；
+	//   - 声明扫描读的是每条 Isolate 声明**写的是什么值**。
+	//
+	// 前者对「服务名没进 realm.Services()」是瞎的，而那正是漏声明
+	// 导致静默共享的形态；后者与服务是否注册无关。SAFETY.md 的 R3
+	// 靠这一层落地。
+	for _, s := range p.shards {
+		n, err := s.declarationCheck()
+		rep.Declarations += n
+		if err != nil {
+			return rep, err
+		}
+	}
 
 	// 跨分片：两个租户落在不同的 App 里，隔离由"不同的 Reflect 实例"
 	// 保证，而不是靠 isolateKey。这里各取一个做哨兵比对——它对

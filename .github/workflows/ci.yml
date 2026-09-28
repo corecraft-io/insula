@@ -109,10 +109,13 @@ jobs:
       # 这些测试混在全量测试里也会跑到，所以这一步的目的不是「多跑」，
       # 而是把「哪些测试构成安全面」写成一份**签入的模式**：删掉其中一条
       # 或把它改名，都会在 workflow 的 diff 里出现，是一个需要被评审的动作，
-      # 而不是一次静默删除。实测该模式命中 50 条、覆盖 17 个包。
+      # 而不是一次静默删除。实测该模式命中 65 条、覆盖 17 个包。
+      #
+      # `Isolat|Realm|Declaration` 三个词是有意并存的：隔离这条规则有两层
+      # 断言（解析结果 vs 声明本身），只点名 `Isolat` 会漏掉第二层。
       - name: security-surface assertions
         run: |
-          go test -race -count=1 -run 'Ident|Isolat|Breach|SelfCheck|Forced|Smuggl|Forged|Foreign|Leak|Redact|Strip|Namespace|FailClosed' ./...
+          go test -race -count=1 -run 'Ident|Isolat|Realm|Declaration|Breach|SelfCheck|Forced|Smuggl|Forged|Foreign|Leak|Redact|Strip|Namespace|FailClosed' ./...
 
   bench:
     name: Benchmarks (compile + gross regression)

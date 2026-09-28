@@ -115,8 +115,13 @@ func Session() map[string]any {
 	return m
 }
 
-// SharedRealmLabel 判断一个 Isolate 声明值是否为共享域标签。
-// 平台层禁止共享域（见 SAFETY.md 的四条硬规则），本函数供自检使用。
+// SharedRealmLabel 判断一个 Isolate 声明值是否为共享域标签（即字符串）。
+//
+// 这是一个**窄**谓词：它只回答"这个值是不是 `@标签`"。平台层的规则比
+// 它严——`Isolate` 只接受 `true`，`false`（把自己挪出外层域）与其它类型
+// （被读成未声明）同样会导致共享。因此**执行点不是本函数**，而是
+// CheckIsolateDeclarations；本函数留给只关心"是不是字符串标签"这个
+// 具体问题的调用方（含 realm 自己的守门测试）。
 func SharedRealmLabel(v any) bool {
 	_, isString := v.(string)
 	return isString
@@ -314,4 +319,80 @@ func AssertIsolated(a, b *cordis.Context, name string) error {
 			"most likely its name is missing from realm.Services()", ErrIsolationBreach, name)
 	}
 	return nil
+}
+
+// ErrSharedRealm 一条 Isolate 声明不是 true。
+//
+// 它覆盖三种写法，后果都是跨租户共享：字符串（"@标签" 共享域）、
+// false（把自己从外层域里摘出去，于是落到更外层的域）、以及其它类型
+// （cordis 视为未声明，同样回落）。
+var ErrSharedRealm = errors.New("insula/realm: isolate declaration is not private")
+
+// CheckIsolateDeclarations 遍历一棵入口子树，断言每一条 Isolate 声明都恰好是 true。
+//
+// # 为什么它是必要的，而不是「有 AssertIsolated 就够了」
+//
+// 两者看的是**不同的东西**，且各有一个盲区：
+//
+//   - AssertIsolated 比的是**解析结果**（两个语境拿到的是不是同一个实例）。
+//     它对「这个服务名根本没进 realm.Services()」是瞎的——那正是
+//     「漏声明 → 静默共享」的形态；而且一侧缺失时它按定义判为隔离成立。
+//   - 本函数看的是**声明本身**。它不关心服务是否真的注册了，因此
+//     任何一条写错的声明都跑不掉，包括写在平台清单之外的服务名上。
+//
+// cordis 对 Isolate 值的解释见 loader.go 的 realmKey：
+// true → "#<该入口的短 ID>"（私有域）；字符串 → "@<标签>"（共享域）；
+// 其它 → 视为未声明。后两种都**不报错**——写错一个值的效果是
+// 两个租户静默解析到同一个实例，故障现场离原因很远。
+//
+// 因此平台的规则是「Isolate 只接受 true」（SAFETY.md R3），本函数是
+// 这条规则的执行点：任何人手工建了入口、或在插件里写了共享域标签，
+// 自检会指名到入口路径与出错的服务名上。
+//
+// 返回扫过的声明条数。**调用方必须把这个数报出去**：否则报告里
+// 「查过且干净」与「什么都没查」长得一模一样，而这两件事的
+// 含义正相反（`shard.SelfCheckReport.PairsChecked` 是同一条纪律）。
+func CheckIsolateDeclarations(root *cordis.Entry) (declarations int, err error) {
+	if root == nil {
+		// 而不是返回 (0, nil)：那会让「子树丢了」伪装成「查过且干净」。
+		return 0, fmt.Errorf("%w: nil subtree root", ErrSharedRealm)
+	}
+	for name, label := range root.Options().Isolate {
+		declarations++
+		if label != true {
+			return declarations, fmt.Errorf("%w: entry %s declares service %q as %s; "+
+				"only true (a private realm) is allowed", ErrSharedRealm,
+				root.ID(), name, describeLabel(label))
+		}
+	}
+	group := root.Subgroup()
+	if group == nil {
+		return declarations, nil
+	}
+	for _, child := range group.Children() {
+		n, cerr := CheckIsolateDeclarations(child)
+		declarations += n
+		if cerr != nil {
+			return declarations, cerr
+		}
+	}
+	return declarations, nil
+}
+
+// describeLabel 把一条不合规的 Isolate 值渲染成人话，供错误消息使用。
+//
+// 分开写是因为这三种写法的**修法不同**：共享域标签要去掉那个标签，
+// false 是有人想「显式不隔离」，其它类型通常是配置填错了字段。
+func describeLabel(label any) string {
+	switch v := label.(type) {
+	case string:
+		return fmt.Sprintf("a shared realm label %q", v)
+	case bool:
+		// true 已在调用方放行，能走到这里的必是 false。
+		return "false, which removes it from the enclosing realm"
+	case nil:
+		return "nil"
+	default:
+		return fmt.Sprintf("%#v", v)
+	}
 }

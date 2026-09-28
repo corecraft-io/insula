@@ -742,6 +742,9 @@ func TestSelfCheckPassesForProvisionedPool(t *testing.T) {
 	if rep.PairsChecked == 0 {
 		t.Error("一对都没比较：自检没有覆盖到任何东西")
 	}
+	if rep.Declarations == 0 {
+		t.Error("一条 Isolate 声明都没扫到：自检的声明层没跑，而报告里看不出差别")
+	}
 	if !rep.Exhaustive {
 		t.Errorf("SelfCheckPairs=64 时应当穷尽，报告为抽样：%+v", rep)
 	}
@@ -1262,4 +1265,125 @@ func containsTenant(list []ident.Tenant, want ident.Tenant) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// 声明层的自检（SAFETY R3）
+// ---------------------------------------------------------------------------
+
+// loaderOf 取某分片自己的 loader。
+//
+// 分片之间是**不同的 App**，因此各有各的入口树；自检的声明层扫的是
+// 本片那棵。这里从 App 上把它取回来，是为了能用与生产相同的注入方式
+// （手工建入口）来验证自检确实会红。
+func loaderOf(t *testing.T, s *Shard) *cordis.Loader {
+	t.Helper()
+	v, ok := s.App().Root().Get("loader")
+	if !ok {
+		t.Fatal("分片的 App 上没有 loader 服务")
+	}
+	l, ok := v.(*cordis.Loader)
+	if !ok {
+		t.Fatalf("loader 服务的类型是 %T，期望 *cordis.Loader", v)
+	}
+	return l
+}
+
+// TestSelfCheckScansEveryTenantSubtree 钉住计数。
+//
+// 计数不是装饰：没有它，「声明层跑了且干净」与「声明层根本没跑」
+// 在报告里完全同形，而这两件事的含义正相反。
+func TestSelfCheckScansEveryTenantSubtree(t *testing.T) {
+	h := newHarness(t, Config{Shards: 2})
+	h.mustProvision("tenant-a", "tenant-b")
+
+	rep, err := h.pool.SelfCheck()
+	if err != nil {
+		t.Fatalf("SelfCheck: %v", err)
+	}
+
+	// 每个租户的根上至少挂着 realm.Services() 条声明。
+	if want := 2 * len(realm.Services()); rep.Declarations < want {
+		t.Errorf("Declarations = %d，期望至少 %d（2 个租户 × %d 条）",
+			rep.Declarations, want, len(realm.Services()))
+	}
+
+	// 再多开通一个租户，计数必须跟着涨——否则它可能是个常数，
+	// 而不是真的逐租户扫出来的。
+	before := rep.Declarations
+	h.mustProvision("tenant-c")
+	rep, err = h.pool.SelfCheck()
+	if err != nil {
+		t.Fatalf("SelfCheck: %v", err)
+	}
+	if rep.Declarations <= before {
+		t.Errorf("多开通一个租户后 Declarations 仍为 %d（此前 %d）：声明层没有跟着租户走",
+			rep.Declarations, before)
+	}
+
+	// 空池：没有租户就没有声明，计数为 0 是**正确**的（而不是没跑）。
+	empty := newHarness(t, Config{Shards: 2})
+	repEmpty, err := empty.pool.SelfCheck()
+	if err != nil {
+		t.Fatalf("空池 SelfCheck: %v", err)
+	}
+	if repEmpty.Declarations != 0 {
+		t.Errorf("空池 Declarations = %d，期望 0", repEmpty.Declarations)
+	}
+}
+
+// TestSelfCheckFailsOnSharedRealmLabel 是这条链路的正面控制。
+//
+// 它端到端地证明「手工造一个带共享域标签的入口 → 自检响亮地失败 →
+// 指标记一次隔离破坏」。只测干净那一向的话，一个恒返回 (n, nil) 的
+// 实现同样能全绿——而这正是 SAFETY.md 声称存在、实际却谁也没执行过的
+// 那条断言。
+func TestSelfCheckFailsOnSharedRealmLabel(t *testing.T) {
+	h := newHarness(t, Config{Shards: 2})
+	h.mustProvision("tenant-a", "tenant-b")
+
+	// 自检必须是干净的起点，否则下面就不清楚是谁让它红的。
+	if _, err := h.pool.SelfCheck(); err != nil {
+		t.Fatalf("起点自检就失败了：%v", err)
+	}
+	breachesBefore := h.metrics.Global().Snapshot("").IsolationBreaches
+
+	// 挑一个租户，手工在它的子树下建一个带共享域标签的入口。
+	// 这就是「有人绕过 realm.Tenant() 手工造入口」的形态：
+	// cordis 会老实地把它建成 "@shared" 共享域，两个租户静默同域。
+	s := h.pool.Shards()[0]
+	ids := s.Tenants().List()
+	if len(ids) == 0 {
+		t.Fatal("第 0 片上没有租户，测试没造出前置条件")
+	}
+	entryID, ok := s.Tenants().ResolveEntry(ids[0])
+	if !ok {
+		t.Fatalf("取不到 %s 的入口 ID", ids[0])
+	}
+	dirty := realm.Child(entryID, "dirty")
+	if _, err := loaderOf(t, s).Create(cordis.EntryOptions{
+		ID:      dirty,
+		Name:    realm.PluginSessions,
+		Isolate: map[string]any{realm.ServiceHistory: "@shared"},
+	}, entryID, 0); err != nil {
+		t.Fatalf("建脏入口失败：%v", err)
+	}
+
+	_, err := h.pool.SelfCheck()
+	if err == nil {
+		t.Fatal("自检对一条共享域声明无动于衷：SAFETY R3 的声明层没有真的在跑")
+	}
+	if !errors.Is(err, realm.ErrSharedRealm) {
+		t.Fatalf("错误 = %v，期望是 realm.ErrSharedRealm", err)
+	}
+	if !strings.Contains(err.Error(), dirty) {
+		t.Errorf("错误 %q 必须指名到出错的入口 %q", err, dirty)
+	}
+
+	// 而且必须记一次隔离破坏：只进日志不进指标的话，"隔离失效了"
+	// 这件事在监控上看不见，而监控先挂正是这条链路要避免的。
+	if got := h.metrics.Global().Snapshot("").IsolationBreaches; got <= breachesBefore {
+		t.Errorf("IsolationBreaches = %d（此前 %d）：隔离失效没有计入指标",
+			got, breachesBefore)
+	}
 }
