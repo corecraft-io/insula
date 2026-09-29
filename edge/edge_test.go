@@ -1456,3 +1456,147 @@ func TestServerWorksWithoutAuditAndMetrics(t *testing.T) {
 // ---------------------------------------------------------------------------
 // 辅助
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// SSE 心跳
+// ---------------------------------------------------------------------------
+//
+// 心跳此前 0% 覆盖：它有生产调用方（edge.go:651 的 SSE 循环），但**从没有
+// 任何测试让它跑过一次**。心跳不是装饰——上游代理按"空闲多久没收到字节"
+// 掐连接，一个已经在思考但一时没有事件可发的 run 只能靠注释帧留在线上。
+// 而心跳失效的表现是"长 run 在代理后面随机断流"，与心跳逻辑相隔极远。
+
+// failingWriter 接受写入但总是失败，用来模拟客户端断开。
+type failingWriter struct{}
+
+func (failingWriter) Header() http.Header       { return http.Header{} }
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("客户端已断开") }
+func (failingWriter) WriteHeader(int)           {}
+
+// TestWriteSSECommentWritesACommentFrame 守帧的形状与 flush。
+//
+// 两件事都不能少：SSE 里只有以 ":" 开头、并以**空行**结尾的行才是注释帧
+// （少了空行它会把后面的 data 行吞掉）；而不 flush 的话注释帧留在缓冲里，
+// 代理看到的仍然是空闲——心跳等于没发。
+func TestWriteSSECommentWritesACommentFrame(t *testing.T) {
+	rec := httptest.NewRecorder()
+	var s Server
+	if !s.writeSSEComment(rec, "hb") {
+		t.Fatal("写成功了却返回 false")
+	}
+	if got, want := rec.Body.String(), ": hb\n\n"; got != want {
+		t.Fatalf("心跳帧 = %q，期望 %q", got, want)
+	}
+	if !rec.Flushed {
+		t.Fatal("心跳没有 flush：不 flush 的注释帧留在缓冲里，代理照样按空闲掐连接")
+	}
+}
+
+// TestWriteSSECommentReportsWriteFailure 守返回值。
+//
+// SSE 循环拿它决定要不要收尾（`if !s.writeSSEComment(...) { drain; return }`）。
+// 若写失败仍返回 true，循环会一直往外写一个已经断掉的连接。
+func TestWriteSSECommentReportsWriteFailure(t *testing.T) {
+	var s Server
+	if s.writeSSEComment(failingWriter{}, "hb") {
+		t.Fatal("写失败却返回 true：SSE 循环不会收尾，会一直往断掉的连接上写")
+	}
+}
+
+// TestStreamingHeartbeatKeepsTheStreamWarm 端到端：心跳真的会在长 run 里发出来。
+//
+// 用 fakeModels 的 gate 把模型调用卡住，制造"run 还活着但一时没有事件可发"
+// 的状态——那正是心跳存在的唯一场景。gate 不放，跑多少次心跳都不会出现，
+// 所以这里必须真的造出来而不是只调单元函数。
+func TestStreamingHeartbeatKeepsTheStreamWarm(t *testing.T) {
+	h := newHarness(t, Config{Heartbeat: 5 * time.Millisecond})
+	h.models.script = []caps.Response{textReply("好了")}
+	h.models.gate = make(chan struct{})
+	h.models.entered = make(chan struct{}, 1)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs?stream=1",
+		strings.NewReader(`{"input":"hi"}`))
+	req.Header.Set("Authorization", "Bearer tok-a")
+
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		h.srv.ServeHTTP(rec, req)
+	}()
+
+	// 等模型调用确实进去，再让若干心跳周期过去。
+	select {
+	case <-h.models.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("模型调用一直没有进入")
+	}
+	time.Sleep(60 * time.Millisecond) // 5ms 间隔 ⇒ 约 12 次心跳
+	close(h.models.gate)
+
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("请求没有返回")
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, ": hb") {
+		t.Fatalf("run 在模型里停了 60ms（约 12 个心跳周期）却没有发出心跳帧：\n%s", body)
+	}
+	// 心跳是**注释**，不能污染事件流：客户端按 event: 分帧，
+	// 混进一个非注释帧会让它把心跳当成事件。
+	if strings.Contains(body, "event: hb") {
+		t.Errorf("心跳被写成了事件而不是注释：\n%s", body)
+	}
+	// 而且 run 本身要照常完成。
+	if !strings.Contains(body, "event: done") {
+		t.Errorf("有心跳但 run 没有正常收尾：\n%s", body)
+	}
+}
+
+// TestStreamingHeartbeatCanBeDisabled 守那个"显式关闭"的口子。
+//
+// Config.Heartbeat 的 0 与负数是两件事：0 取默认（15s），负数才是关闭
+// （WithHeartbeatDisabled 就是用 -1 表达的）。若把负数也当 0 处理，
+// "关掉心跳"就变成一个静默无效的开关——那正是部署时最难看出来的失败。
+func TestStreamingHeartbeatCanBeDisabled(t *testing.T) {
+	h := newHarness(t, Config{}.WithHeartbeatDisabled())
+	if got := h.srv.cfg.Heartbeat; got != -1 {
+		t.Fatalf("关闭后 Heartbeat = %v，期望 -1（负数才是关闭，0 会取默认值）", got)
+	}
+
+	h.models.script = []caps.Response{textReply("好了")}
+	h.models.gate = make(chan struct{})
+	h.models.entered = make(chan struct{}, 1)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs?stream=1",
+		strings.NewReader(`{"input":"hi"}`))
+	req.Header.Set("Authorization", "Bearer tok-a")
+
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		h.srv.ServeHTTP(rec, req)
+	}()
+
+	select {
+	case <-h.models.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("模型调用一直没有进入")
+	}
+	// 关掉之后，同样的等待时长里不该出现心跳。
+	time.Sleep(60 * time.Millisecond)
+	close(h.models.gate)
+
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("请求没有返回")
+	}
+
+	if body := rec.Body.String(); strings.Contains(body, ": hb") {
+		t.Fatalf("心跳已显式关闭，流里却仍有注释帧：\n%s", body)
+	}
+}

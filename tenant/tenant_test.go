@@ -668,3 +668,148 @@ func sameSet(got, want []string) bool {
 	}
 	return true
 }
+
+// TestSessionPathIsAFullPathNotAShortID 钉住 cordis 两套寻址的分界。
+//
+// 这是本仓库记录过的一类静默失败：store 索引以**短 ID** 为扁平键查重，
+// 而 Resolve/Remove 认**路径**（":" 分隔）。把 "<租户根>-s0…" 当 path 传进
+// Remove，会被当成"根组下的一个同名入口"去解析，报 cannot resolve——
+// 而报错信息里那个 ID 看起来完全正确，是最容易看错的一类失败。
+//
+// 会话入口是嵌套的（t-<hash> : t-<hash>-sessions : t-<hash>-s0…），
+// 因此它正是这个坑的高发处：它的短 ID 与它的路径**不同形**。
+// 租户根恰好在根组下，两者同形，所以调用方很容易误以为"短 ID 到处能用"。
+func TestSessionPathIsAFullPathNotAShortID(t *testing.T) {
+	h := newHarness(t)
+	h.mustProvision(h.spec("tenant-a"))
+
+	sess, err := h.man.Session("tenant-a", "chat-1")
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	entryID, ok := h.man.ResolveEntry("tenant-a")
+	if !ok {
+		t.Fatal("取不到租户根入口 ID")
+	}
+
+	// 1) 路径必须由 ":" 分段，且末段就是短 ID（realm.Path 的定义）。
+	segments := strings.Split(sess.Path, ":")
+	if len(segments) != 3 {
+		t.Fatalf("Path = %q，应当由 3 段组成（租户根 : 会话分组 : 会话入口）", sess.Path)
+	}
+	if segments[0] != entryID {
+		t.Errorf("Path 的第一段 = %q，期望租户根 %q", segments[0], entryID)
+	}
+	if segments[len(segments)-1] != sess.EntryID {
+		t.Errorf("Path 的末段 = %q，期望会话短 ID %q", segments[len(segments)-1], sess.EntryID)
+	}
+
+	// 2) 会话是嵌套入口，短 ID 与路径必须**不同形**——同形会让这个坑消失，
+	//    也会让"短 ID 到处能用"的错误直觉站得住。
+	if sess.Path == sess.EntryID {
+		t.Fatal("会话的 Path 与 EntryID 相同：嵌套入口不可能是同形的，短 ID 被当成了路径")
+	}
+
+	// 3) 用 Path 必须解析得到；这是"它是一条合法路径"的直接证据。
+	if _, err := h.tree().Resolve(sess.Path); err != nil {
+		t.Fatalf("Resolve(%q) = %v；这条路径应当可用（Remove 走的就是它）", sess.Path, err)
+	}
+
+	// 4) 反过来：把**短 ID 当路径**用必须失败。这正是这个坑的形态——
+	//    它解析不到就报 cannot resolve，而报错里那个 ID 看起来完全正确。
+	//    若它能解析成功，说明两套寻址被混为一谈，静默误路由的前提就成立了。
+	if _, err := h.tree().Resolve(sess.EntryID); err == nil {
+		t.Fatalf("Resolve(%q)（会话短 ID）成功了：短 ID 被当成了路径", sess.EntryID)
+	}
+}
+
+// TestConcurrentSameSessionNameLeavesOneEntry 守并发去重的**清理**。
+//
+// 会话名的唯一性检查发生在入口**建好之后**（先建、再在锁里比、输了就把
+// 自己摘掉，见 Manager.Session 末尾）。之所以只能这样做：唯一性判据是
+// "这个会话名有没有人注册过"，而注册与建入口无法在一个临界区里完成
+// ——建入口要走 cordis 的调度器，不能在锁里等。
+//
+// 于是"输的那个把自己摘掉"这一步（dropSessionEntry）成了正确性的必需项，
+// 而不是打扫卫生：漏摘一个入口，树里就留下一个**重复的短 ID**。而本仓库
+// 记录过的地雷正是这个——EntryGroup.reconcile 遇到重复 ID 只记一条日志
+// 然后跳过，不报错，随后任何按短 ID 的寻址都可能命中另一个租户的入口。
+//
+// 所以这条断言不是"entry 数好看"，而是"没有留下第二个入口"。
+func TestConcurrentSameSessionNameLeavesOneEntry(t *testing.T) {
+	h := newHarness(t)
+	h.mustProvision(h.spec("tenant-a"))
+
+	entryID, ok := h.man.ResolveEntry("tenant-a")
+	if !ok {
+		t.Fatal("取不到租户根入口 ID")
+	}
+	sessionsPath := realm.SessionsGroupPath(entryID)
+
+	const K = 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	got := make([]*tenant.Session, K)
+	errs := make([]error, K)
+	for i := 0; i < K; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // 尽可能让 K 个调用挤进同一个窗口
+			got[i], errs[i] = h.man.Session("tenant-a", "same")
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	// 1) 每个调用都要成功。
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("第 %d 个并发调用失败：%v", i, err)
+		}
+	}
+
+	// 2) 必须**全部**拿到同一个句柄。拿到不同句柄意味着有两个调用都
+	//    认为自己赢了——那正是"重复入口"的另一种表现。
+	winner := got[0]
+	if winner == nil {
+		t.Fatal("第一个调用没有返回会话")
+	}
+	for i, s := range got {
+		if s != winner {
+			t.Errorf("第 %d 个调用拿到不同的会话句柄：去重以先到的为准，不该出现两个赢家", i)
+		}
+	}
+
+	// 3) 树里只能剩**一个**会话入口。
+	group, err := h.tree().Resolve(sessionsPath)
+	if err != nil {
+		t.Fatalf("Resolve(%q) = %v", sessionsPath, err)
+	}
+	sub := group.Subgroup()
+	if sub == nil {
+		t.Fatal("会话分组没有子组：容器入口的分组应当由分组插件建立")
+	}
+	children := sub.Children()
+	if len(children) != 1 {
+		var ids []string
+		for _, c := range children {
+			ids = append(ids, c.Options().ID)
+		}
+		t.Fatalf("并发建同名会话后树里有 %d 个入口 %v，期望 1 个："+
+			"输的那些没有被摘掉，留下的是重复短 ID（静默串租的前提）", len(children), ids)
+	}
+	if gotID := children[0].Options().ID; gotID != winner.EntryID {
+		t.Errorf("树里留下的是 %q，期望赢家的 %q", gotID, winner.EntryID)
+	}
+
+	// 4) 索引与树必须一致：两边各自只有一条，且是同一条。
+	if sessions := h.mustTenant("tenant-a").Sessions(); len(sessions) != 1 || sessions[0] != "same" {
+		t.Errorf("索引里的会话 = %v，期望 [same]", sessions)
+	}
+	// 5) 留下来的那个入口必须仍然可寻址（清理不能把赢家一起摘了）。
+	if _, err := h.tree().Resolve(winner.Path); err != nil {
+		t.Errorf("赢家的路径 Resolve(%q) = %v：清理误伤了赢家", winner.Path, err)
+	}
+}

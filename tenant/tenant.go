@@ -751,10 +751,14 @@ func (m *Manager) Session(t ident.Tenant, s ident.Session) (*Session, error) {
 		return nil, err
 	}
 	sess := &Session{
-		Tenant:    t,
-		ID:        s,
-		EntryID:   entryID,
-		Path:      realm.Path(tn.EntryID, tn.SessionsEntryID, entryID),
+		Tenant:  t,
+		ID:      s,
+		EntryID: entryID,
+		// 路径一律经 realm 拼：本包里**不要**自己写 Path(a, b, c)。
+		// 短 ID 与全路径是 cordis 的两套并存寻址，混用会静默失败，
+		// 而失败的样子（cannot resolve）与"ID 写错了"无法分辨。
+		// realm.Path 的注释把这件事定成了"由本包一处分界"。
+		Path:      realm.SessionPath(tn.EntryID, seq),
 		Runtime:   rt,
 		createdAt: m.d.now(),
 	}
