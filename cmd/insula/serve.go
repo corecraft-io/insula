@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/metaRobin/insula"
-	"github.com/metaRobin/insula/admit"
+	"github.com/corecraft-io/insula"
+	"github.com/corecraft-io/insula/admit"
 )
 
 // devRequired 是没加 -dev 时的报错。

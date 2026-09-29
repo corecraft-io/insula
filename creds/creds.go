@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/metaRobin/insula/ident"
+	"github.com/corecraft-io/insula/ident"
 )
 
 // DefaultTTL 是句柄默认有效期。

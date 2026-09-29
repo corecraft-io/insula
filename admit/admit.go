@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/metaRobin/insula/ident"
+	"github.com/corecraft-io/insula/ident"
 )
 
 // Reason 说明拒绝的原因，供接入层映射状态码与指标标签。

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/metaRobin/insula/guard"
-	"github.com/metaRobin/insula/ident"
+	"github.com/corecraft-io/insula/guard"
+	"github.com/corecraft-io/insula/ident"
 )
 
 type fakeClock struct {

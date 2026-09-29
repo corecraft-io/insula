@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/memory"
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/memory"
 )
 
 const (

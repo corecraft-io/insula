@@ -108,7 +108,7 @@ cordis 对它们中的任何一条都没有意见。
 ## 报告漏洞
 
 请通过
-[GitHub Security Advisories](https://github.com/metaRobin/insula/security/advisories/new)
+[GitHub Security Advisories](https://github.com/corecraft-io/insula/security/advisories/new)
 报告安全问题，而不是开一个公开 issue。请附上版本或 commit、最小复现，以及你认为上面哪条
 属性被破坏了。
 

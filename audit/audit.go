@@ -22,7 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/metaRobin/insula/ident"
+	"github.com/corecraft-io/insula/ident"
 )
 
 // Outcome 动作结果。

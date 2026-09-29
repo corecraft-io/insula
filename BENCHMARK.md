@@ -14,7 +14,7 @@ per-tenant path, run them and compare.
 ## Environment
 
 All numbers below: **Apple M5 Pro / darwin arm64**, Go 1.26.3,
-`module github.com/metaRobin/insula` declaring `go 1.22`, measured with the local
+`module github.com/corecraft-io/insula` declaring `go 1.22`, measured with the local
 `go.work` active — so `cordis` resolved to the `../cordis` working tree and not to
 a published version. They are medians of a handful of runs, not
 statistically significant samples — treat the *shape* of each curve as the

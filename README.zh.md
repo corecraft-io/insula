@@ -22,7 +22,7 @@ Insula 处于**开发预览**阶段，迭代很快。
 ### 从源码运行
 
 ```sh
-git clone https://github.com/metaRobin/insula.git
+git clone https://github.com/corecraft-io/insula.git
 cd insula
 go test -race ./...
 go run ./cmd/insula demo
@@ -57,11 +57,11 @@ curl -s localhost:8081/metrics
 ## 作为依赖使用
 
 ```sh
-go get github.com/metaRobin/insula
+go get github.com/corecraft-io/insula
 ```
 
 ```go
-import insula "github.com/metaRobin/insula"
+import insula "github.com/corecraft-io/insula"
 ```
 
 `cordis` 是唯一的依赖，和其它模块一样由模块代理提供。要同时开发 insula 与 cordis，请用
@@ -119,7 +119,7 @@ cmd/insula/  进程入口（serve / demo）
 
 ## 社区与支持
 
-- 通过 [GitHub Discussions](https://github.com/metaRobin/insula/discussions)
+- 通过 [GitHub Discussions](https://github.com/corecraft-io/insula/discussions)
   提交反馈或缺陷报告。
 - 给你自己的插件仓库加上
   [`insula-plugin`](https://github.com/topics/insula-plugin) 话题，便于被发现。
@@ -132,7 +132,7 @@ cmd/insula/  进程入口（serve / demo）
   author={metaRobin},
   year={2026},
   publisher={GitHub},
-  howpublished={\url{https://github.com/metaRobin/insula}},
+  howpublished={\url{https://github.com/corecraft-io/insula}},
 }
 ```
 

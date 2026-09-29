@@ -11,7 +11,7 @@
 ## 环境
 
 下文所有数字：**Apple M5 Pro / darwin arm64**，Go 1.26.3，`module
-github.com/metaRobin/insula` 声明 `go 1.22`，且本地 `go.work` 处于生效状态（因此
+github.com/corecraft-io/insula` 声明 `go 1.22`，且本地 `go.work` 处于生效状态（因此
 `cordis` 解析到 `../cordis` 的工作树，而不是代理上的已发布版本）。它们是几次运行的中位
 数，不是统计显著样本——**曲线的形状**才是结论，任何一个采样点都只是近似。
 

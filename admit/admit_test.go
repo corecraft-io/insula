@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/metaRobin/insula/admit"
-	"github.com/metaRobin/insula/ident"
+	"github.com/corecraft-io/insula/admit"
+	"github.com/corecraft-io/insula/ident"
 )
 
 // fakeClock 让速率测试不必真的 sleep。

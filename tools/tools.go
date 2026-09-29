@@ -36,9 +36,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/corecraft-io/insula/caps"
+	"github.com/corecraft-io/insula/realm"
 	"github.com/metaRobin/cordis"
-	"github.com/metaRobin/insula/caps"
-	"github.com/metaRobin/insula/realm"
 )
 
 // ErrUnknownTool 调用了注册表中不存在的工具（非白名单拒绝，而是根本不存在）。

@@ -23,7 +23,7 @@ Review the [safety notice](SAFETY.md) before running the project.
 ### Run from source
 
 ```sh
-git clone https://github.com/metaRobin/insula.git
+git clone https://github.com/corecraft-io/insula.git
 cd insula
 go test -race ./...
 go run ./cmd/insula demo
@@ -60,11 +60,11 @@ curl -s localhost:8081/metrics
 ## Use as a dependency
 
 ```sh
-go get github.com/metaRobin/insula
+go get github.com/corecraft-io/insula
 ```
 
 ```go
-import insula "github.com/metaRobin/insula"
+import insula "github.com/corecraft-io/insula"
 ```
 
 `cordis` is the only dependency, and it comes from the module proxy like any
@@ -130,7 +130,7 @@ decisions these boundaries come from.
 ## Community and support
 
 - Submit feedback or bug reports through
-  [GitHub Discussions](https://github.com/metaRobin/insula/discussions).
+  [GitHub Discussions](https://github.com/corecraft-io/insula/discussions).
 - Add the [`insula-plugin`](https://github.com/topics/insula-plugin) topic to
   your plugin repository for discoverability.
 
@@ -142,7 +142,7 @@ decisions these boundaries come from.
   author={metaRobin},
   year={2026},
   publisher={GitHub},
-  howpublished={\url{https://github.com/metaRobin/insula}},
+  howpublished={\url{https://github.com/corecraft-io/insula}},
 }
 ```
 

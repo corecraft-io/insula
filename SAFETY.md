@@ -142,7 +142,7 @@ Stated plainly, so that nobody discovers it in production:
 ## Reporting a vulnerability
 
 Report security issues through
-[GitHub Security Advisories](https://github.com/metaRobin/insula/security/advisories/new)
+[GitHub Security Advisories](https://github.com/corecraft-io/insula/security/advisories/new)
 rather than a public issue. Please include the version or commit, a minimal
 reproduction, and which of the properties above you believe is violated.
 

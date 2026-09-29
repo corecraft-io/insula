@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/metaRobin/insula/ident"
+	"github.com/corecraft-io/insula/ident"
 )
 
 // Quota 是单租户在一个滚动窗口内的模型用量上限。

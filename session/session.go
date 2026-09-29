@@ -23,10 +23,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/memory"
+	"github.com/corecraft-io/insula/realm"
 	"github.com/metaRobin/cordis"
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/memory"
-	"github.com/metaRobin/insula/realm"
 )
 
 // Policy 是会话历史窗口策略。

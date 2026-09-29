@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/metaRobin/insula/ident"
+	"github.com/corecraft-io/insula/ident"
 )
 
 // ---------------------------------------------------------------------------

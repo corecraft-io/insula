@@ -48,15 +48,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/metaRobin/insula/admit"
-	"github.com/metaRobin/insula/agent"
-	"github.com/metaRobin/insula/audit"
-	"github.com/metaRobin/insula/caps"
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/metrics"
-	"github.com/metaRobin/insula/session"
-	"github.com/metaRobin/insula/tenant"
-	"github.com/metaRobin/insula/tools"
+	"github.com/corecraft-io/insula/admit"
+	"github.com/corecraft-io/insula/agent"
+	"github.com/corecraft-io/insula/audit"
+	"github.com/corecraft-io/insula/caps"
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/metrics"
+	"github.com/corecraft-io/insula/session"
+	"github.com/corecraft-io/insula/tenant"
+	"github.com/corecraft-io/insula/tools"
 )
 
 // ---------------------------------------------------------------------------

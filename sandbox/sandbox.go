@@ -37,7 +37,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/metaRobin/insula/caps"
+	"github.com/corecraft-io/insula/caps"
 )
 
 // ErrNoSandbox 未配置执行通道，调用被 fail-closed 拒绝。

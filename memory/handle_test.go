@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/memory"
-	"github.com/metaRobin/insula/realm"
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/memory"
+	"github.com/corecraft-io/insula/realm"
 )
 
 // 本文件守的是 memory.Handle —— 租户隔离域里那个**瘦句柄**。

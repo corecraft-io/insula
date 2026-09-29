@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/metaRobin/insula/creds"
-	"github.com/metaRobin/insula/ident"
+	"github.com/corecraft-io/insula/creds"
+	"github.com/corecraft-io/insula/ident"
 )
 
 const (

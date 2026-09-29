@@ -48,7 +48,7 @@ the layout is a dependency chain with nothing else in it.
 Do **not** add a `replace` directive to `go.mod`. `replace` is honoured only in
 the *main* module, so one committed here would (a) be silently ignored by every
 downstream consumer — misleading, since it looks like it does something — and
-(b) break `go install github.com/metaRobin/insula/...@latest`, which applies the
+(b) break `go install github.com/corecraft-io/insula/...@latest`, which applies the
 main module's `replace` to a relative path inside the module cache.
 
 Use a Go workspace instead. It lives **above both checkouts**, outside either

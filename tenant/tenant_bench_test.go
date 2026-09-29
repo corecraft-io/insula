@@ -25,12 +25,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/corecraft-io/insula/gateway"
+	"github.com/corecraft-io/insula/guard"
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/session"
+	"github.com/corecraft-io/insula/tenant"
 	cordis "github.com/metaRobin/cordis"
-	"github.com/metaRobin/insula/gateway"
-	"github.com/metaRobin/insula/guard"
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/session"
-	"github.com/metaRobin/insula/tenant"
 )
 
 // benchSizes 是体量曲线的采样点。

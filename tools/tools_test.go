@@ -6,9 +6,9 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/metaRobin/insula/caps"
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/tools"
+	"github.com/corecraft-io/insula/caps"
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/tools"
 )
 
 // ---------------------------------------------------------------------------

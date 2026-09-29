@@ -65,8 +65,8 @@ jobs:
           set -e
           fail() { echo "::error::$1"; exit 1; }
 
-          grep -qx 'module github.com/metaRobin/insula' go.mod \
-            || fail "go.mod must declare the full domain module path github.com/metaRobin/insula"
+          grep -qx 'module github.com/corecraft-io/insula' go.mod \
+            || fail "go.mod must declare the full domain module path github.com/corecraft-io/insula"
 
           if grep -nE '^\s*replace|=>' go.mod; then
             fail "go.mod must not contain a replace directive; depend on the published cordis version instead (see AGENTS.md)"

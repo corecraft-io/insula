@@ -10,15 +10,15 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/metaRobin/insula/agent"
-	"github.com/metaRobin/insula/audit"
-	"github.com/metaRobin/insula/caps"
-	"github.com/metaRobin/insula/guard"
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/memory"
-	"github.com/metaRobin/insula/metrics"
-	"github.com/metaRobin/insula/realm"
-	"github.com/metaRobin/insula/session"
+	"github.com/corecraft-io/insula/agent"
+	"github.com/corecraft-io/insula/audit"
+	"github.com/corecraft-io/insula/caps"
+	"github.com/corecraft-io/insula/guard"
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/memory"
+	"github.com/corecraft-io/insula/metrics"
+	"github.com/corecraft-io/insula/realm"
+	"github.com/corecraft-io/insula/session"
 )
 
 // ---------------------------------------------------------------------------

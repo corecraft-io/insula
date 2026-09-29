@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/metaRobin/insula/ident"
+	"github.com/corecraft-io/insula/ident"
 )
 
 // ---------------------------------------------------------------------------

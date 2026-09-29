@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/realm"
+	"github.com/corecraft-io/insula/tenant"
 	cordis "github.com/metaRobin/cordis"
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/realm"
-	"github.com/metaRobin/insula/tenant"
 )
 
 // 本文件守的是 SAFETY.md 的 **R3：共享域（@label）在平台层禁用**。

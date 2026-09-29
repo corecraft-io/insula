@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/metaRobin/insula"
-	"github.com/metaRobin/insula/admit"
-	"github.com/metaRobin/insula/audit"
-	"github.com/metaRobin/insula/edge"
+	"github.com/corecraft-io/insula"
+	"github.com/corecraft-io/insula/admit"
+	"github.com/corecraft-io/insula/audit"
+	"github.com/corecraft-io/insula/edge"
 )
 
 // runDemo 跑一遍完整流程并把每一步的结果打出来。

@@ -22,15 +22,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/metaRobin/insula/caps"
-	"github.com/metaRobin/insula/creds"
-	"github.com/metaRobin/insula/edge"
-	"github.com/metaRobin/insula/gateway"
-	"github.com/metaRobin/insula/guard"
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/session"
-	"github.com/metaRobin/insula/tenant"
-	"github.com/metaRobin/insula/tools"
+	"github.com/corecraft-io/insula/caps"
+	"github.com/corecraft-io/insula/creds"
+	"github.com/corecraft-io/insula/edge"
+	"github.com/corecraft-io/insula/gateway"
+	"github.com/corecraft-io/insula/guard"
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/session"
+	"github.com/corecraft-io/insula/tenant"
+	"github.com/corecraft-io/insula/tools"
 )
 
 // devCredScope 与 gateway 的默认作用域一致。

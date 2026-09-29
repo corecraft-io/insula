@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/metaRobin/insula/ident"
-	"github.com/metaRobin/insula/metrics"
+	"github.com/corecraft-io/insula/ident"
+	"github.com/corecraft-io/insula/metrics"
 )
 
 var (

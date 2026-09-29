@@ -1,4 +1,4 @@
-module github.com/metaRobin/insula
+module github.com/corecraft-io/insula
 
 go 1.22
 
