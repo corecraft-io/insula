@@ -241,3 +241,101 @@ func TestIdentityIsCarriedThrough(t *testing.T) {
 		t.Fatalf("identity = %s/%s/%s", tenant, session, run)
 	}
 }
+
+// Exhausted 必须覆盖**全部四个**维度，而不只是墙钟。
+//
+// 它是给「开始新工作之前」用的快速预检：预检的唯一价值就是不放过任何一条
+// 已经到顶的维度。只看墙钟的话，一个在 10 步预算里烧掉 10000 步的 run
+// 也会被告知「还有额度」——预检通过了，却什么也没挡住。
+func TestExhaustedCoversEveryDimension(t *testing.T) {
+	const steps, calls, tokens = 2, 3, 40
+
+	cases := []struct {
+		name    string
+		budget  guard.Budget
+		spend   func(g *guard.Guard)
+		advance time.Duration
+		want    bool
+	}{
+		{
+			name: "各维度都还有余量时不报用尽",
+			budget: guard.Budget{
+				MaxSteps: steps, MaxToolCalls: calls,
+				MaxTokens: tokens, WallClock: time.Hour,
+			},
+			spend: func(g *guard.Guard) {
+				_ = g.BeginStep()
+				_ = g.ToolCall()
+				_ = g.AddTokens(1)
+			},
+			advance: time.Minute,
+			want:    false,
+		},
+		{
+			// 用量正好等于上限：这一步已被放行，但下一步必被拒。
+			name:   "步数正好用满",
+			budget: guard.Budget{MaxSteps: steps},
+			spend: func(g *guard.Guard) {
+				for i := 0; i < steps; i++ {
+					_ = g.BeginStep()
+				}
+			},
+			want: true,
+		},
+		{
+			name:   "工具调用数正好用满",
+			budget: guard.Budget{MaxToolCalls: calls},
+			spend: func(g *guard.Guard) {
+				for i := 0; i < calls; i++ {
+					_ = g.ToolCall()
+				}
+			},
+			want: true,
+		},
+		{
+			name:   "token 正好用满",
+			budget: guard.Budget{MaxTokens: tokens},
+			spend: func(g *guard.Guard) {
+				_ = g.AddTokens(tokens)
+			},
+			want: true,
+		},
+		{
+			name:    "墙钟到点",
+			budget:  guard.Budget{WallClock: time.Minute},
+			spend:   func(*guard.Guard) {},
+			advance: time.Minute,
+			want:    true,
+		},
+		{
+			// 0 表示不限，不是「零额度」——四个维度都不设限时永远不该报用尽。
+			name:   "全部不设限时永远不报用尽",
+			budget: guard.Budget{},
+			spend: func(g *guard.Guard) {
+				for i := 0; i < 100; i++ {
+					_ = g.BeginStep()
+				}
+				_ = g.AddTokens(1_000_000)
+			},
+			advance: 24 * time.Hour,
+			want:    false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := newClock()
+			g := newGuard(tc.budget, clk)
+			if got := g.Budget(); got != tc.budget {
+				t.Fatalf("Budget() = %+v，期望构造时传入的 %+v", got, tc.budget)
+			}
+			tc.spend(g)
+			if tc.advance > 0 {
+				clk.Advance(tc.advance)
+			}
+			if got := g.Exhausted(); got != tc.want {
+				t.Fatalf("Exhausted() = %v，期望 %v（Usage = %+v）", got, tc.want, g.Usage())
+			}
+		})
+	}
+}

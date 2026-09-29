@@ -242,8 +242,32 @@ func (g *Guard) Remaining() Budget {
 	return out
 }
 
-// Exhausted 报告是否已触顶任意维度。
-func (g *Guard) Exhausted() bool { return g.Check() != nil }
+// Exhausted 报告是否已触顶任意维度，供「开始新工作之前」做快速预检。
+//
+// 它**不等于** Check()：Check 只看非累加型的墙钟，而步数 / 工具调用 /
+// token 三个累加维度得各自比对用量。把两者混为一谈会让预检形同虚设——
+// 一个在 10 步预算里烧掉 10000 步的 run 也会被判成「还有额度」。
+//
+// 累加维度的判据是 used >= limit，不是 used > limit。因为 BeginStep 那一族
+// 是「先记后判」：用量正好等于上限时这一次仍然放行、**下一次**必被拒，
+// 此刻预算事实上已经用尽，预检就该说用尽。
+func (g *Guard) Exhausted() bool {
+	if g.Check() != nil {
+		return true
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.budget.MaxSteps > 0 && g.steps >= g.budget.MaxSteps {
+		return true
+	}
+	if g.budget.MaxToolCalls > 0 && g.toolCalls >= g.budget.MaxToolCalls {
+		return true
+	}
+	if g.budget.MaxTokens > 0 && g.tokens >= g.budget.MaxTokens {
+		return true
+	}
+	return false
+}
 
 func (g *Guard) exceeded(d Dimension, limit, used int64) error {
 	return &Exceeded{

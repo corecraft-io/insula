@@ -201,3 +201,37 @@ func TestClosedCarriesItsReason(t *testing.T) {
 		t.Fatalf("the reason must reach the operator: %v", err)
 	}
 }
+
+// 等级的名字是**对外词汇**：它会进启动日志、能力清单评审和告警文本。
+// 它平时永远走不到——测试通过时没人格式化它，所以覆盖率天然是 0，
+// 名字改错了也不会有任何东西变红。三条断言里真正值钱的是第二条：
+// 两个不同的等级绝不能显示成同一个词，否则运维读日志时分不出哪一条是
+// 「必须出进程」。
+func TestTierVocabularyIsStable(t *testing.T) {
+	cases := []struct {
+		tier sandbox.Tier
+		want string
+	}{
+		{sandbox.TierTrusted, "trusted"},
+		{sandbox.TierSemi, "semi-trusted"},
+		{sandbox.TierUntrusted, "untrusted"},
+		{sandbox.Tier(99), "unknown"}, // 越界值必须显式可见，不能静默退化成某一级
+	}
+	for _, tc := range cases {
+		if got := tc.tier.String(); got != tc.want {
+			t.Errorf("Tier(%d).String() = %q，期望 %q", int(tc.tier), got, tc.want)
+		}
+	}
+
+	seen := map[string]sandbox.Tier{}
+	for _, tier := range []sandbox.Tier{
+		sandbox.TierTrusted, sandbox.TierSemi, sandbox.TierUntrusted,
+	} {
+		name := tier.String()
+		if prev, dup := seen[name]; dup {
+			t.Fatalf("Tier(%d) 与 Tier(%d) 都显示成 %q，运维读日志分不出来",
+				int(tier), int(prev), name)
+		}
+		seen[name] = tier
+	}
+}
