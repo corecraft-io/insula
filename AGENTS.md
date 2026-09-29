@@ -14,7 +14,7 @@ gofmt -l . && go vet ./... && go build ./... && go test -race -count=1 ./...
 Plus, when the change touches anything on a per-tenant path:
 
 ```sh
-go test -run '^$' -bench . -benchmem -benchtime 3x -count 3 -cpu 1 ./tenant/
+GOGC=off go test -run '^$' -bench . -benchmem -benchtime 1x -count 5 -cpu 4 ./tenant/
 go test -run '^$' -bench . -benchmem ./caps/
 go run ./cmd/insula demo
 ```
@@ -194,14 +194,22 @@ was clean" cannot be confused with "did not run".
   Add an anti-self-deception guard: before asserting a count is small, assert the
   fixture actually built the large thing (e.g. `indexTotal == realms`), otherwise
   a fixture that silently built nothing passes the test.
-- **Benchmarks: run the package alone, with `-cpu 1`.** `go test ./...` runs
-  each package's test binary in parallel, and neighbour load lands directly in
-  your numbers.
+- **Benchmarks: run the package alone, and keep the collector out of the timed
+  window.** `go test ./...` runs each package's test binary in parallel, and
+  neighbour load lands directly in your numbers. Then: at `GOMAXPROCS=1` the GC
+  has no second `P` to mark on, so every mark assist triggered inside the timed
+  window is paid by the benchmark goroutine, and the bill grows with `N` — the
+  exact axis these gates measure. One `N=1000` teardown point reads 25 149
+  ns/tenant at `-cpu 1` with GC on and 7 704 with `GOGC=off`. Pick either knob
+  and write it next to the number; the tables use `GOGC=off -cpu 4`.
 - **Cross-scale comparisons need identical `-benchtime` and `-count` on both
   sides.** `Wait()` scan cost read 56.41 ns/fiber under `-benchtime 3x` and
   9.5–10.1 ns/fiber under `-benchtime 5x`, on the same build. If a number
   "got slower", the first move is a same-parameter A/B against the previous
   revision — not a code change.
+- **A figure that cannot be reproduced from this repository's own tables is a
+  bug in the document.** Three published figures were wrong on 2026-09-29, and
+  each was checkable against another line of the same file with one division.
 
 See [BENCHMARK.md](BENCHMARK.md) for the gate benchmarks and current numbers.
 

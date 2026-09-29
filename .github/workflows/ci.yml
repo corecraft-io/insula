@@ -140,8 +140,10 @@ jobs:
       # 这一步的目的**不是取数**，而是两件事：
       #   1) 基准能被编译（性能门禁不能悄悄坏掉）；
       #   2) 跨规模曲线不出现断言式失败（如规模测试里的长度断言被破坏）。
-      # 真要比较数字，必须按 BENCHMARK.md 的纪律在本机单独跑包 + -cpu 1，
-      # 并且两边用相同的 -benchtime 与 -count。CI runner 是共享且抖动的，
-      # 它的数字不能用来判断回归。
+      # 真要比较数字，必须按 BENCHMARK.md 的纪律在本机单独跑包，并让回收器
+      # 不进计时窗口（`GOGC=off` 或 `-cpu >= 2`；`-cpu 1` 配 GC 开时，标记
+      # 协助费由被测 goroutine 在计时窗口内自付，且随 N 增长），且两边用
+      # 相同的 -benchtime 与 -count。CI runner 是共享且抖动的，它的数字
+      # 不能用来判断回归。
       - name: benchmarks
         run: go test -run '^$' -bench . -benchmem -benchtime 3x -count 1 -timeout 30m ./...
