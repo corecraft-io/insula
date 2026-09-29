@@ -276,10 +276,19 @@ func (p *Pool) credential(t ident.Tenant) (*creds.Handle, error) {
 // 顺序是有讲究的：
 //
 //  1. 额度检查放最前——额度用尽时不该消耗熔断器的探测额度，
-//     也不该产生凭证签发；
-//  2. 熔断检查在凭证之前——池已判定不可用时不要做任何多余的动作；
-//  3. 只有真正打到上游的失败才计入熔断。凭证未配置是配置错误，
+//     也不该产生凭证签发。它是**只读**判断，因此不产生副作用；
+//  2. 运维硬闸门紧随其后、在任何预占之前。它同样是只读判断；
+//     若放在预占之后，「拒绝」本身就会烧掉租户额度（见下）。
+//  3. 熔断检查在凭证之前——池已判定不可用时不要做任何多余的动作；
+//  4. 只有真正打到上游的失败才计入熔断。凭证未配置是配置错误，
 //     把它计入熔断会让一个租户的配置疏漏把整个池熔掉。
+//
+// 另有一条不是顺序、而是纪律：**预占之后没能发出请求，必须归还额度**。
+// 租户额度、平台额度、熔断探测额度三者都是「先占后用」，中间每一条
+// 早退路径都对应一次需要撤销的副作用。归还统一由下面那**一个** defer
+// 完成，不在各分支里手写：手写会漏，而漏掉的表现是「拒绝一次、
+// 扣一次额度」——它在代码评审里几乎看不出来，要等上游故障恢复之后
+// 租户报「还是用不了」才会暴露。
 func (p *Pool) Complete(ctx context.Context, t ident.Tenant, req caps.Request) (caps.Response, error) {
 	var zero caps.Response
 	if !t.Valid() {
@@ -289,37 +298,69 @@ func (p *Pool) Complete(ctx context.Context, t ident.Tenant, req caps.Request) (
 		return zero, ErrUnavailable
 	}
 
+	// 这两个判断都只读，必须在任何 Reserve 之前。
 	acct := p.Account(t)
 	if acct.Exhausted() {
 		return zero, &ErrQuotaExceeded{Tenant: t, Quota: acct.Quota(),
 			Used: acct.Usage(), Reason: "token or call budget exhausted"}
 	}
+	if p.forcedDown.Load() {
+		return zero, ErrUnavailable
+	}
+
 	if err := p.platform.Reserve(); err != nil {
 		return zero, &ErrQuotaExceeded{Tenant: t, Quota: p.platform.Quota(),
 			Used: p.platform.Usage(), Reason: "platform-wide budget exhausted"}
 	}
+
+	// 平台额度已预占。此后每一条早退路径都要把它（以及下面陆续占到的
+	// 租户额度、探测额度）还回去。三个布尔量分别对应「占到了什么」，
+	// 各自的 false 分支都有真实场景，不能省：
+	//   tenantReserved —— 租户额度是自己占的，未占到就自减会偷走
+	//                     别的并发调用的预占；
+	//   probe          —— Allow 返回 false 的原因之一正是「探测已被
+	//                     别的调用占用」，那时归还等于放出第二个探测，
+	//                     破坏 HalfOpen「只放一个」的定义。
+	tenantReserved, probe, refundable := false, false, true
+	defer func() {
+		if !refundable {
+			return
+		}
+		p.platform.Release()
+		if tenantReserved {
+			acct.Release()
+		}
+		if probe {
+			p.breaker.ReleaseProbe()
+		}
+	}()
+
 	if err := acct.Reserve(); err != nil {
 		return zero, err
 	}
+	tenantReserved = true
 
 	// 数据面**不能**用 Healthy() 做前置闸门：Healthy 只在熔断回到 Closed
 	// 时复位，而回到 Closed 必须靠 Allow() 放行一次探测。若在这里先拦一道
 	// Healthy()，探测永远拿不到机会，池打开后就再也无法通过流量自愈。
 	// 因此放行判断统一交给 breaker.Allow()，它已经编码了 Open/HalfOpen 的
 	// 全部语义；forcedDown 是运维开关，它才是真正的硬闸门。
-	if p.forcedDown.Load() {
-		return zero, ErrUnavailable
-	}
 	if !p.breaker.Allow() {
 		return zero, ErrUnavailable
 	}
+	probe = true
 
 	cred, err := p.credential(t)
 	if err != nil {
-		// 配置错误不算上游故障，因此不报给熔断器。
+		// 配置错误不算上游故障，因此不报给熔断器——但也**不能就这么
+		// 走掉**：那会把探测额度永久留在占用态（见 Breaker.ReleaseProbe）。
 		p.onWarn("tenant %s has no usable model credential: %v", t, err)
 		return zero, err
 	}
+
+	// 越过这条线，请求真的发出去了：额度与探测额度都算花掉。上游即使
+	// 失败也不归还——那次调用确实发生过，熔断器由 Failure() 记账。
+	refundable = false
 
 	res, err := p.upstream.Complete(ctx, t, req, cred)
 	if err != nil {

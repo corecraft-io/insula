@@ -141,6 +141,29 @@ func (b *Breaker) Success() {
 	}
 }
 
+// ReleaseProbe 归还一次 Allow 放行、但并没有真正打到上游的探测额度。
+//
+// 为什么需要它：Allow 在 HalfOpen 下会把**唯一**的探测额度占掉，而有些
+// 失败路径既打不到上游，也不该上报 Failure——凭证签发失败是本地配置
+// 问题，报 Failure 会让一个租户的疏漏把共享池熔掉。两边都不做，Allow
+// 文档里警告的事就发生了：熔断器永久卡在 HalfOpen，Allow 永远返回
+// false，池再也无法通过真实流量自愈。这比「被熔掉」更糟——熔断至少
+// 会自己恢复。
+//
+// 归还而不是 Reset：Reset 直接把状态推到 Closed，等于在没有验证过上游
+// 的情况下把依赖者放回来。归还探测额度保留 HalfOpen，下一次调用可以
+// 继续探测；凭证一旦修好，第一次真正打到上游的探测就会闭合熔断器。
+//
+// 在 Closed 状态下调用它是安全的空操作（此时没有探测额度这回事）。
+// 在 Open、或 HalfOpen 且探测已被**别人**占用时不要调用它：那会放行出
+// 第二个并发探测，破坏「只放一个」。调用方因此必须先确认 Allow 返回过
+// true。
+func (b *Breaker) ReleaseProbe() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.halfFlight = false
+}
+
 // Failure 上报一次失败。达阈值则打开；HalfOpen 下探测失败立即重回 Open
 // 并重新计时（而不是立刻再给一次探测机会，否则恢复期会持续放行）。
 func (b *Breaker) Failure() {

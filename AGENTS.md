@@ -127,6 +127,32 @@ every shard. One per shard silently turns "the platform total" into N times the
 total. The same reasoning applies to the model pool, memory store, metrics
 registry, and audit sink: process-level singletons, thin per-shard handles.
 
+### A reservation that never reached the upstream must be refunded
+
+Quota and breaker-probe credit are both **reserve-then-use**: `Account.Reserve`
+claims a call slot, `Breaker.Allow` claims the single half-open probe. Every
+early return between claiming and actually issuing the request must hand them
+back — `Account.Release`, `Breaker.ReleaseProbe`. `Pool.Complete` routes all of
+those paths through **one** `defer`, deliberately: per-branch hand-written
+refunds get missed, and a missed one reads as "one rejection, one unit of quota
+burned" — invisible in review, and it only surfaces after the upstream recovers
+and the tenant still cannot call.
+
+Two consequences worth spelling out:
+
+- The operational kill-switch (`Pool.SetEnabled(false)`) and the breaker gate are
+  **reads**, so they run before any reservation. Put them after and a burst of
+  rejected calls can transiently exhaust a quota the tenant never spent. That
+  window is only observable under concurrency, and it misreports the cause as
+  `ErrQuotaExceeded` instead of `ErrUnavailable` — the tenant sees "out of
+  budget" when the real answer is "the pool is down".
+- A failure that never reached the upstream must **not** be reported to the
+  breaker (`Breaker.Failure`), but the probe still has to come back. That is what
+  `ReleaseProbe` is for: `Reset` is wrong (it closes the breaker without having
+  verified the upstream) and `Failure` is wrong (it re-opens the pool over a
+  local config error). Skip it and the breaker wedges in HalfOpen forever —
+  strictly worse than being open, because open at least heals itself.
+
 ### Enforcement is structural, not conventional
 
 Where the type system can make a bad thing impossible, it must. `Provision` is
@@ -153,6 +179,16 @@ was clean" cannot be confused with "did not run".
   mutation does *not* turn anything red, distinguish "the test doesn't cover it"
   from "the test isn't aimed at it" — the second is more common and more
   insidious.
+- **Scope each mutation to the test you meant to break.** Run it with
+  `-run '^TestName$'`, not the whole package. A mutation that reddens half a
+  package cannot distinguish "this test guards the invariant" from "this test was
+  collateral damage".
+- **The expected-red set is an empirical result; write it narrow and let the run
+  correct you.** A mutation often breaks less than you predicted. Observed: making
+  `Account.Release` a no-op reddened only the breaker-path test, not the
+  kill-switch test — because the kill-switch now returns *before* reserving
+  anything, so it never calls `Release` at all. A prediction that over-claims is
+  how you end up believing a test covers something it does not.
 - **Scale tests assert output shape, never elapsed time.** Assert a length or a
   count. A timing assertion is flaky on CI and will be disabled within a month.
   Add an anti-self-deception guard: before asserting a count is small, assert the
