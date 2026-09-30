@@ -17,7 +17,7 @@ permissions:
 # ---------------------------------------------------------------------------
 # 本 workflow 只检出 insula 一个仓库。
 #
-# 曾经的布局是「两次 checkout」（把 metaRobin/cordis 检出到兄弟目录），
+# 曾经的布局是「两次 checkout」（把 cordis 检出到兄弟目录），
 # 那是 `replace cordis => ../cordis` 的代价。既然依赖改成 go.mod 里
 # `require github.com/corecraft-io/cordis v0.2.0`，cordis 就由模块代理提供，
 # 兄弟目录不再需要，也不再允许回来（见下面 module declaration 那一步）。

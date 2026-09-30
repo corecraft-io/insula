@@ -55,7 +55,7 @@ Use a Go workspace instead. It lives **above both checkouts**, outside either
 repository, so neither repo has to gitignore it:
 
 ```
-// metaRobin/go.work
+// corecraft-io/go.work
 go 1.22
 
 use (

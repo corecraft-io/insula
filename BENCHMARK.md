@@ -156,7 +156,7 @@ once, use a `go.work` above the two checkouts — see `AGENTS.md` § Dependencie
 
 One consequence matters for benchmarking. If a cordis change is *the point* of
 your work, run the gates with the workspace active (the default when you are
-inside `metaRobin/`); otherwise you are measuring the published `v0.2.0` and not
+inside `corecraft-io/`); otherwise you are measuring the published `v0.2.0` and not
 your edit. `GOWORK` is the switch: `go env GOWORK` prints the file when it is
 loaded, and `GOWORK=off` puts you back on the published graph.
 

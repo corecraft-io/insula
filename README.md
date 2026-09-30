@@ -139,7 +139,7 @@ decisions these boundaries come from.
 ```bibtex
 @misc{insula2026,
   title={Insula: Every Tenant is a Realm},
-  author={metaRobin},
+  author={corecraft-io},
   year={2026},
   publisher={GitHub},
   howpublished={\url{https://github.com/corecraft-io/insula}},

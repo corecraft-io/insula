@@ -129,7 +129,7 @@ cmd/insula/  进程入口（serve / demo）
 ```bibtex
 @misc{insula2026,
   title={Insula: Every Tenant is a Realm},
-  author={metaRobin},
+  author={corecraft-io},
   year={2026},
   publisher={GitHub},
   howpublished={\url{https://github.com/corecraft-io/insula}},
