@@ -26,9 +26,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/ident"
 	"github.com/corecraft-io/insula/realm"
-	"github.com/metaRobin/cordis"
 )
 
 // ErrNoTenant 未提供租户标识。这是编程错误，不是运行时状况。

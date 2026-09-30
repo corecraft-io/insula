@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	cordis "github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/realm"
-	cordis "github.com/metaRobin/cordis"
 )
 
 func TestHasherIsStableAndDistinct(t *testing.T) {

@@ -44,11 +44,11 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/guard"
 	"github.com/corecraft-io/insula/ident"
 	"github.com/corecraft-io/insula/memory"
 	"github.com/corecraft-io/insula/realm"
-	"github.com/metaRobin/cordis"
 )
 
 // ---------------------------------------------------------------------------

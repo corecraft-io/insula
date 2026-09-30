@@ -40,6 +40,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/admit"
 	"github.com/corecraft-io/insula/audit"
 	"github.com/corecraft-io/insula/caps"
@@ -51,7 +52,6 @@ import (
 	"github.com/corecraft-io/insula/session"
 	"github.com/corecraft-io/insula/tenant"
 	"github.com/corecraft-io/insula/tools"
-	"github.com/metaRobin/cordis"
 )
 
 // ErrClosed 分片池已停机。

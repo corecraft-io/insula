@@ -37,10 +37,10 @@ import (
 	"testing"
 	"time"
 
+	cordis "github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/caps"
 	"github.com/corecraft-io/insula/ident"
 	"github.com/corecraft-io/insula/realm"
-	cordis "github.com/metaRobin/cordis"
 )
 
 // fanoutRepeats 是每个 K 下的重复次数。单次测量在微秒量级，

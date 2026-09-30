@@ -34,11 +34,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/caps"
 	"github.com/corecraft-io/insula/creds"
 	"github.com/corecraft-io/insula/ident"
 	"github.com/corecraft-io/insula/realm"
-	"github.com/metaRobin/cordis"
 )
 
 // Feature 是可选能力开关。

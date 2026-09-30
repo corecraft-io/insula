@@ -3,7 +3,7 @@
 English | [中文](README.zh.md)
 
 Insula (`insula`) is an open-source multi-tenant agent service platform built on
-[Cordis](https://github.com/metaRobin/cordis) — a Go implementation of the
+[Cordis](https://github.com/corecraft-io/cordis) — a Go implementation of the
 spatiotemporal composability model described in
 [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).
 

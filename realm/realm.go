@@ -37,7 +37,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/metaRobin/cordis"
+	"github.com/corecraft-io/cordis"
 )
 
 // ---------------------------------------------------------------------------

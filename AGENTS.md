@@ -37,7 +37,7 @@ legitimate, but it means writing a new ADR, not editing the old one.
 `cordis` is an ordinary published dependency, not a sibling checkout:
 
 ```
-require github.com/metaRobin/cordis v0.1.0
+require github.com/corecraft-io/cordis v0.2.0
 ```
 
 It is the only one, and adding a second needs a conversation first — the point of
@@ -76,7 +76,7 @@ GOWORK=off go build ./...
 ```
 
 Before the first tag exists this fails (correctly) with `missing go.sum entry for
-module providing package github.com/metaRobin/cordis`; once the tag is on the
+module providing package github.com/corecraft-io/cordis`; once the tag is on the
 proxy, `go mod tidy` writes `go.sum` and it passes. Re-run it after any cordis
 version bump: it is the cheapest way to catch a `go.mod`/`go.sum`/tag disagreement,
 because it resolves through the proxy instead of the local tree.

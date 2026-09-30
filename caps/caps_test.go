@@ -5,12 +5,12 @@ import (
 	"reflect"
 	"testing"
 
+	cordis "github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/caps"
 	"github.com/corecraft-io/insula/guard"
 	"github.com/corecraft-io/insula/ident"
 	"github.com/corecraft-io/insula/memory"
 	"github.com/corecraft-io/insula/realm"
-	cordis "github.com/metaRobin/cordis"
 )
 
 // ---------------------------------------------------------------------------

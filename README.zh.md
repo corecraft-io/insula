@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Insula（`insula`）是建在 [Cordis](https://github.com/metaRobin/cordis) 之上的开源多租户
+Insula（`insula`）是建在 [Cordis](https://github.com/corecraft-io/cordis) 之上的开源多租户
 agent 服务平台。Cordis 是《
 [一种时空可组合的程序设计范式](https://arxiv.org/abs/2608.25512)》（_A Programming
 Paradigm for Spatiotemporal Composability_）所述时空可组合组件模型的 Go 实现。

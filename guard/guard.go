@@ -28,9 +28,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/ident"
 	"github.com/corecraft-io/insula/realm"
-	"github.com/metaRobin/cordis"
 )
 
 // Dimension 是被触发的限制维度。

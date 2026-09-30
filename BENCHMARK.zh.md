@@ -117,14 +117,14 @@ go test -run '^$' -bench . -benchmem -benchtime 3x -count 1 -timeout 30m ./...
 第 1 条纪律与方差提醒让你避免的两件事。不要从 CI 的一次运行里读出一个数字就称其为回归。
 把它带回本机，按五条纪律重来。
 
-CI 只检出本仓库。`cordis` 是普通的已发布依赖（`require github.com/metaRobin/cordis
-v0.1.0`），runner 像任何其它使用者一样从模块代理取它。workflow 里有一条断言：`go.mod`
+CI 只检出本仓库。`cordis` 是普通的已发布依赖（`require github.com/corecraft-io/cordis
+v0.2.0`），runner 像任何其它使用者一样从模块代理取它。workflow 里有一条断言：`go.mod`
 中不得重新出现 `replace` 指令——因为 `replace` 只在**主模块**生效，写在这里会被所有
 下游静默忽略，同时弄坏 `go install …@latest`。要同时改两个仓库，把 `go.work` 放在两个
 检出目录之上即可，见 `AGENTS.md` 的 Dependencies 一节。
 
 这件事对取数有一条实际后果：如果**改动本身就在 cordis**，那么跑门禁时必须让 workspace
-处于生效状态（在 `metaRobin/` 下默认就是），否则量到的是已发布的 `v0.1.0`，不是你的修改。
+处于生效状态（在 `metaRobin/` 下默认就是），否则量到的是已发布的 `v0.2.0`，不是你的修改。
 开关是 `GOWORK`：`go env GOWORK` 有输出即表示已加载，`GOWORK=off` 则回到已发布的依赖图。
 
 ## 门禁一 —— 开通必须是平的

@@ -147,7 +147,7 @@ above tell you to avoid. Do not read a number off a CI run and call it a
 regression. Bring it back to a local machine and follow the five rules.
 
 CI checks out this repository only. `cordis` is an ordinary published dependency
-(`require github.com/metaRobin/cordis v0.1.0`), so the runner resolves it through
+(`require github.com/corecraft-io/cordis v0.2.0`), so the runner resolves it through
 the module proxy exactly as any other consumer would. The workflow asserts that no
 `replace` directive reappears in `go.mod`, because such a directive is honoured
 only in the *main* module: it would be silently ignored by every downstream
@@ -156,7 +156,7 @@ once, use a `go.work` above the two checkouts — see `AGENTS.md` § Dependencie
 
 One consequence matters for benchmarking. If a cordis change is *the point* of
 your work, run the gates with the workspace active (the default when you are
-inside `metaRobin/`); otherwise you are measuring the published `v0.1.0` and not
+inside `metaRobin/`); otherwise you are measuring the published `v0.2.0` and not
 your edit. `GOWORK` is the switch: `go env GOWORK` prints the file when it is
 loaded, and `GOWORK=off` puts you back on the published graph.
 

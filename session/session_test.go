@@ -7,11 +7,11 @@ import (
 	"sync"
 	"testing"
 
+	cordis "github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/ident"
 	"github.com/corecraft-io/insula/memory"
 	"github.com/corecraft-io/insula/realm"
 	"github.com/corecraft-io/insula/session"
-	cordis "github.com/metaRobin/cordis"
 )
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	cordis "github.com/corecraft-io/cordis"
 	"github.com/corecraft-io/insula/admit"
 	"github.com/corecraft-io/insula/audit"
 	"github.com/corecraft-io/insula/caps"
@@ -23,7 +24,6 @@ import (
 	"github.com/corecraft-io/insula/session"
 	"github.com/corecraft-io/insula/tenant"
 	"github.com/corecraft-io/insula/tools"
-	cordis "github.com/metaRobin/cordis"
 )
 
 // ---------------------------------------------------------------------------
