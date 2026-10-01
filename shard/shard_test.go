@@ -1437,3 +1437,68 @@ func TestSelfCheckFailsOnSharedRealmLabel(t *testing.T) {
 			got, breachesBefore)
 	}
 }
+
+// TestWireCordisLoggerRoutesFailuresToPlatformWarn 守住 cordis 日志的接线形状。
+//
+// cordis v0.4.0 把内部故障记进自带的 LoggerService，默认出口是 stderr。
+// 不接过来，运维面前就是两条日志流；接错了级别，告警通道则会被 loader
+// 的变更日志淹没。两件事都会静默发生——没有报错，只是该看见的看不见。
+func TestWireCordisLoggerRoutesFailuresToPlatformWarn(t *testing.T) {
+	var warns warnLog
+	app := cordis.New()
+	defer app.Close()
+	wireCordisLogger(app, warns.add)
+
+	app.Logger().Error("entry %s: %v", "t1", errors.New("apply failed"))
+	app.Logger().Warn("wait: system still not settled after %d rounds", 3)
+	app.Logger().Info("apply plugin %s", "models")
+	app.Logger().Debug("tick %d", 1)
+
+	got := warns.joined()
+
+	// 正文已由 cordis 渲染完毕，这里只补前缀；格式串必须是渲染后的结果。
+	for _, want := range []string{
+		"cordis error (root): entry t1: apply failed",
+		"cordis warn (root): wait: system still not settled after 3 rounds",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("告警通道缺少 %q\n实际：%q", want, got)
+		}
+	}
+
+	// Info 与 Debug 不占告警通道：loader 的变更日志一旦有人打开，
+	// 那些行会把真正的故障挤出去。
+	if strings.Contains(got, "apply plugin models") {
+		t.Errorf("Info 级不该进告警通道：%q", got)
+	}
+	if strings.Contains(got, "tick 1") {
+		t.Errorf("Debug 级不该进告警通道：%q", got)
+	}
+	if n := len(strings.Split(got, "\n")); n != 2 {
+		t.Errorf("告警条数 = %d，期望 2（error + warn）\n实际：%q", n, got)
+	}
+}
+
+// TestShardWiresCordisLogger 证明每个分片的 App 都真的接了线。
+//
+// 漏掉一片的后果不对称：那一片的内部故障永远不出现在运维的告警通道里，
+// 而其它片正常——于是"有时能看到、有时看不到"比"全都看不到"更难归因。
+func TestShardWiresCordisLogger(t *testing.T) {
+	h := newHarness(t, Config{})
+
+	shards := h.pool.Shards()
+	if len(shards) == 0 {
+		t.Fatal("池里没有分片")
+	}
+	for _, s := range shards {
+		s.app.Logger().Error("probe %d", s.id)
+	}
+
+	got := h.warns.joined()
+	for _, s := range shards {
+		want := fmt.Sprintf("probe %d", s.id)
+		if !strings.Contains(got, want) {
+			t.Errorf("分片 %d 的 cordis 日志没有进入 OnWarn：%q", s.id, got)
+		}
+	}
+}

@@ -383,6 +383,7 @@ func New(cfg Config) (*Pool, error) {
 
 func newShard(id int, cfg Config) (*Shard, error) {
 	app := cordis.New()
+	wireCordisLogger(app, cfg.warn)
 	man, err := tenant.New(tenant.Deps{
 		App:    app,
 		Loader: tenant.NewLoader(app),
@@ -405,6 +406,32 @@ func newShard(id int, cfg Config) (*Shard, error) {
 		metrics: cfg.Metrics,
 		cfg:     cfg,
 	}, nil
+}
+
+// wireCordisLogger 把 cordis 自带的日志接到平台的告警通道。
+//
+// cordis 从 v0.4.0 起把内部的非致命故障记进自带的 LoggerService：入口
+// apply 失败、配置校验失败、dispose 时的 panic、update 钩子出错，以及
+// "等了 waitRounds 轮仍未收敛"。它的默认出口是进程 stderr，也就是说
+// 这些消息绕过了平台的 OnWarn——运维面前出现两条互不相干的日志流，而
+// 这几条恰恰是静默失败最先露头的地方：`wait` 未收敛在 cordis 侧只是一
+// 行 Warn，在 insula 侧却是"这一批租户没装起来"的直接原因。
+//
+// 只转发 Warn 及以上（LogLevel 数值越小越严重）。Info 与 Debug 留给显式
+// 开启的 loader 变更日志——它默认是关的，一旦有人打开，那些行也不该占
+// 用告警通道。
+//
+// 回调在 cordis 的调度器线程上执行，因此 OnWarn 必须非阻塞；这一点对本
+// 包自己的 warn 同样成立。
+func wireCordisLogger(app *cordis.App, warn func(msg string, args ...any)) {
+	app.Logger().Capture(func(m cordis.LogMessage) {
+		if m.Level > cordis.LevelWarn {
+			return
+		}
+		// Text 已按格式串渲染完毕，这里以 %s 传值：直接把它当格式串
+		// 会让正文里偶然出现的 % 被当成动词，输出成 %!。
+		warn("cordis %s (%s): %s", m.Level, m.Name, m.Text)
+	})
 }
 
 // Shards 返回全部分片（按 id 升序）。
