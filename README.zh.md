@@ -79,6 +79,13 @@ use (
 )
 ```
 
+平台装配的可运行示例在 [`example_test.go`](example_test.go)：它演示三个由外部提供的
+依赖（`Upstream` / `Creds` / `Auth`）的形状、装配、以及发一次请求。
+`go test -run Example .` 会真的把它跑一遍。
+
+示例里的适配器是替身，理由与 `demo` 用桩件相同——本仓库不附带生产适配器。
+抄形状，不要抄适配器。
+
 ## 架构
 
 `insula` 是装配根与运维门面，其余每个子包各承担一行角色：
@@ -114,8 +121,8 @@ cmd/insula/  进程入口（serve / demo）
   句柄。隔离是存储结构本身的性质（租户是一级索引维度），而不是靠约定维持的属性。
 
 不可协商的规则与信任分级见 [SAFETY.zh.md](SAFETY.zh.md)；性能门禁与取数纪律见
-[BENCHMARK.zh.md](BENCHMARK.zh.md)；这些边界背后的七条架构决策见
-[`docs/adr/`](docs/adr/README.zh.md)。
+[BENCHMARK.zh.md](BENCHMARK.zh.md)；这些边界背后的八条架构决策见
+[`docs/adr/`](docs/adr/README.zh.md)——其中 0008 仍是 Proposed，并且自己写明了这一点。
 
 ## 社区与支持
 

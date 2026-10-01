@@ -83,6 +83,14 @@ use (
 )
 ```
 
+A runnable example of assembling the platform lives in
+[`example_test.go`](example_test.go). It shows the shape of the three
+externally-supplied dependencies (`Upstream` / `Creds` / `Auth`), opens the
+service, and sends one request; `go test -run Example .` actually runs it.
+
+Its adapters are stand-ins, for the same reason `demo` uses stubs — this
+repository ships no production adapter. Copy the shape, not the adapters.
+
 ## Architecture
 
 `insula` is the assembly root and operations façade. Everything else is a
@@ -124,8 +132,8 @@ Three boundaries are worth knowing before reading the code:
 
 See [SAFETY.md](SAFETY.md) for the non-negotiable rules and the trust tiers,
 [BENCHMARK.md](BENCHMARK.md) for the performance gate and its measurement
-discipline, and [`docs/adr/`](docs/adr/README.md) for the seven architecture
-decisions these boundaries come from.
+discipline, and [`docs/adr/`](docs/adr/README.md) for the eight architecture
+decisions these boundaries come from — 0008 is still Proposed, and says so.
 
 ## Community and support
 

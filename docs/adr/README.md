@@ -53,11 +53,12 @@ time.
 | [0005](0005-tenant-identity-is-an-explicit-parameter.md) | 租户身份是必传参数，不是从上下文推导的隐式值 | Accepted |
 | [0006](0006-untrusted-code-runs-out-of-process.md) | 不可信代码必须进程外执行 | Accepted |
 | [0007](0007-fix-on-first.md) | 先修 O(N)，再谈规模 | Accepted |
+| [0008](0008-hot-and-cold-tenants.md) | 冷热两级租户：空闲租户的装配回收 | Proposed |
 
-## How the seven relate
+## How the eight relate
 
-They are not independent. Three pairs of hand-offs are worth knowing before
-reading them individually:
+They are not independent. Four hand-offs are worth knowing before reading them
+individually:
 
 - **0001 → 0002 → 0007.** 0001 puts the data plane off the scheduler, which makes
   the control plane's O(N) scans its only performance liability. 0002 bounds that
@@ -71,14 +72,20 @@ reading them individually:
 - **0004 ↔ 0005.** They pull in opposite directions and that is deliberate. 0004
   says request-scope state lives in Go `context.Context`; 0005 says identity does
   **not**. The split is: `ctx` carries "may I continue", structs carry "who am I".
+- **0003 → 0008.** 0003 fixes the *shape* of a tenant's entry subtree. 0008 asks a
+  different question about the same object: whether it has to **exist** when
+  nobody is using it. It leaves 0003's shape and realm declarations untouched —
+  which is why it is a separate record rather than an amendment.
 
 ## Terminology
 
 This repository is written in two languages and that is not incidental. ADR
 records and code comments are in Chinese, because the reasoning they record was
 done in Chinese and translating it would let the vocabulary drift from the code
-it describes. `README`, `SAFETY`, `BENCHMARK` and `AGENTS` are paired
-(`X.md` + `X.zh.md`) because they address two different audiences.
+it describes. `README`, `SAFETY` and `BENCHMARK` are paired (`X.md` +
+`X.zh.md`) because they address two different audiences. `AGENTS.md` and
+`LICENSE` are single files: the first speaks to whoever is editing the code and
+is deliberately kept to one copy, the second is not a document at all.
 
 Symbol names, commit messages, and this index are English.
 
