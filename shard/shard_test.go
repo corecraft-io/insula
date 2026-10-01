@@ -742,6 +742,9 @@ func TestSelfCheckPassesForProvisionedPool(t *testing.T) {
 	if rep.PairsChecked == 0 {
 		t.Error("一对都没比较：自检没有覆盖到任何东西")
 	}
+	if rep.Calls == 0 {
+		t.Error("自检跑过却 Calls=0：Calls 应记录调用次数，使 PairsChecked==0 可区分「没跑」")
+	}
 	if rep.Declarations == 0 {
 		t.Error("一条 Isolate 声明都没扫到：自检的声明层没跑，而报告里看不出差别")
 	}
@@ -761,6 +764,10 @@ func TestSelfCheckPassesForProvisionedPool(t *testing.T) {
 	}
 	if got, want := h.pool.Checked(), int64(2*rep.PairsChecked); got != want {
 		t.Errorf("累计 Checked() = %d，期望 %d", got, want)
+	}
+	// Pool.Calls() 累计的是调用次数，与累计对数分开计。两次调用后应等于 2。
+	if got, want := h.pool.Calls(), int64(2); got != want {
+		t.Errorf("累计 Calls() = %d，期望 %d", got, want)
 	}
 
 	// 成功的自检必须被记账。
@@ -815,6 +822,11 @@ func TestSelfCheckWithTooFewTenants(t *testing.T) {
 	if rep.PairsChecked != 0 || !rep.Exhaustive || rep.Tenants != 0 {
 		t.Errorf("空池报告 = %+v", rep)
 	}
+	// 空池自检仍算"跑过"：Calls 必须为 1，否则 PairsChecked==0 无法
+	// 与"自检没跑"区分（这正是 ADR-0002 指出的歧义）。
+	if rep.Calls != 1 {
+		t.Errorf("空池自检应当跑过（Calls=1），得到 %d", rep.Calls)
+	}
 
 	h.mustProvision("tenant-only")
 	rep, err = h.pool.SelfCheck()
@@ -824,11 +836,49 @@ func TestSelfCheckWithTooFewTenants(t *testing.T) {
 	if rep.PairsChecked != 0 {
 		t.Errorf("单租户无法组成对，PairsChecked = %d", rep.PairsChecked)
 	}
+	// 单租户同样"跑过但无对可比"：Calls=1 把它与"没跑"区分开。
+	if rep.Calls != 1 {
+		t.Errorf("单租户自检应当跑过（Calls=1），得到 %d", rep.Calls)
+	}
 	if !rep.Exhaustive {
 		t.Error("没有任何对可比时应当报告穷尽（0 对就是全部 0 对）")
 	}
 	if rep.Tenants != 1 {
 		t.Errorf("Tenants = %d", rep.Tenants)
+	}
+}
+
+// TestSelfCheckCallsDisambiguatesNoPairsFromNotRun 锁死 ADR-0002 指出的歧义：
+// PairsChecked == 0 既可能是"跑了但无对可比"（单租户池），也可能是"自检没跑"
+// （池已关闭）。报告里的 Calls 字段必须让两者可区分——单租户池 Calls==1，
+// 关闭后的池 Calls==0。
+func TestSelfCheckCallsDisambiguatesNoPairsFromNotRun(t *testing.T) {
+	// 跑了、无对可比：Calls 必为 1。
+	h := newHarness(t, Config{Shards: 1})
+	h.mustProvision("solo")
+	ran, err := h.pool.SelfCheck()
+	if err != nil {
+		t.Fatalf("单租户自检: %v", err)
+	}
+	if ran.PairsChecked != 0 {
+		t.Fatalf("单租户不应有对，PairsChecked = %d", ran.PairsChecked)
+	}
+	if ran.Calls != 1 {
+		t.Errorf("跑了却 Calls=%d，期望 1", ran.Calls)
+	}
+
+	// 没跑：池关闭后 SelfCheck 早退，Calls 必为 0、PairsChecked 必为 0，
+	// 且与上面"跑了"的签名不同。这正是监控要分辨的两种 0。
+	h.pool.Close()
+	notRun, err := h.pool.SelfCheck()
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("关闭后自检期望 ErrClosed，得到 %v", err)
+	}
+	if notRun.Calls != 0 {
+		t.Errorf("没跑却 Calls=%d，期望 0（否则无法区分「跑了但无对」与「没跑」）", notRun.Calls)
+	}
+	if notRun.PairsChecked != 0 {
+		t.Errorf("没跑却 PairsChecked=%d，期望 0", notRun.PairsChecked)
 	}
 }
 

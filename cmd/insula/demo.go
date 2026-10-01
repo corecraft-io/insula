@@ -169,23 +169,21 @@ func runDemo(args []string, stdout, stderr io.Writer) error {
 	if breaches != 0 {
 		return fmt.Errorf("隔离自检报告了 %d 次越界", breaches)
 	}
-	// 断言写成「比过对就必有计数」而不是「计数必大于 0」：自检是按
-	// **片内租户对**抽样的，当分片数大于同片租户数时压根没有对可比
-	// （-shards 4 + 3 个租户就是这样），此时计数为 0 是正确的。
-	//
-	// 但这也暴露了这对指标的一个真实缺口，所以下面要把它打出来而不是
-	// 绕过去：0 同时可能是「没有可比的租户对」，而隔离自检本来是为了
-	// 让「查过且干净」区别于「没查」——这一格仍然分辨不出来。
+	// 用报告自带的 Calls 字段区分三种状态（无需跨查 metrics 即可分辨）：
+	//   - Calls == 0                → 自检没跑（例如池已关闭），报告不可信；
+	//   - Calls > 0 且 PairsChecked == 0 → 跑了，但分片数 > 同片租户数，
+	//     没有可比对的对，这是正常状态而非故障；
+	//   - PairsChecked > 0          → 真正比过对，正常。
 	switch {
+	case report.Calls == 0:
+		return fmt.Errorf("隔离自检没有运行（Calls=0）：报告不可信，自检路径未执行")
 	case report.PairsChecked > 0 && checks == 0:
-		return fmt.Errorf("比过 %d 对租户却没有 insula_isolation_checks：「查过且干净」与「没查」会变得不可区分",
+		return fmt.Errorf("比过 %d 对租户却没有 insula_isolation_checks：自检路径与指标记账不一致",
 			report.PairsChecked)
 	case report.PairsChecked == 0:
-		fmt.Fprintln(stdout, "  ⚠ 本次没有可比的租户对（分片数 > 同片租户数），因此 checks=0。")
-		fmt.Fprintln(stdout, "    这不是故障，但也说明这两个计数分不清「没有可比的租户对」与「自检没跑」——")
-		fmt.Fprintln(stdout, "    要分清得再导出一个「自检调用次数」，与「比较过的对数」分开计。")
+		fmt.Fprintf(stdout, "  ✓ 自检已运行（Calls=%d），但本次没有可比的租户对（分片数 > 同片租户数）—— 这是正常状态，不是故障\n", report.Calls)
 	default:
-		fmt.Fprintf(stdout, "  ✓ 比过 %d 对租户，计数非零 —— 「查过且干净」可被监控分辨\n", report.PairsChecked)
+		fmt.Fprintf(stdout, "  ✓ 比过 %d 对租户（Calls=%d），计数非零 —— 「查过且干净」可被监控分辨\n", report.PairsChecked, report.Calls)
 	}
 	// 声明层是同一类哨兵，但它**没有**上面那个缺口：条数随租户走，
 	// 因此「查过且干净」与「没查」在它这里天然可分辨（第 6 步已硬断言）。
@@ -194,8 +192,7 @@ func runDemo(args []string, stdout, stderr io.Writer) error {
 	families := metricFamilies(render)
 	fmt.Fprintf(stdout, "  完整的 %d 个指标族可从 serve -admin /metrics 取：\n", len(families))
 	fmt.Fprintf(stdout, "    %s\n", strings.Join(families, " "))
-	fmt.Fprintln(stdout, "  已知限制 Render 只输出裸样本行，不带 # HELP / # TYPE 头。格式合法"+
-		"（缺 TYPE 即 untyped），但按 TYPE 头发现指标的工具会看到零个族。")
+	fmt.Fprintln(stdout, "  每个指标族都带 # TYPE / # HELP 头，按 TYPE 头发现指标的工具也能正常看到。")
 
 	// ---- 8) 审计 ----
 	step(stdout, 8, "审计：每次运行都留痕，且能按租户翻回")

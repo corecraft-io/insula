@@ -345,6 +345,9 @@ type Pool struct {
 	closed bool
 	// checked 是累计比较过的租户对数，供自检报告"覆盖了多少"。
 	checked atomic.Int64
+	// calls 是累计自检调用次数，与 checked（累计比较过的对数）分开计，
+	// 供监控区分"跑了但没对可比"与"压根没跑"。Pool.Calls() 读它。
+	calls atomic.Int64
 }
 
 // New 构造分片池并启动全部分片。
@@ -556,6 +559,20 @@ type SelfCheckReport struct {
 	// 监控分辨。一个恒为 0 的 Declarations 配着「自检通过」的结论，
 	// 说明声明层根本没跑，而不是说明声明层是干净的。
 	Declarations int
+	// Calls 是本次自检的调用次数：每次 SelfCheck 进入正常执行路径
+	// 就记 1（池已关闭等早退路径记 0）。它与 PairsChecked 分开计——
+	// 后者累计「比较过的租户对数」，前者只回答「这次自检到底有没有
+	// 真的跑过」。
+	//
+	// 这样 PairsChecked == 0 就不再是歧义的：
+	//   - Calls == 0 且 PairsChecked == 0 → 自检没跑（例如池已关闭）；
+	//   - Calls >  0 且 PairsChecked == 0 → 跑了，但分片数大于同片租户数，
+	//     压根没有可比对的对，这是正常状态而非故障。
+	//
+	// 指标层的 insula_isolation_checks 已经是调用计数器，但报告本身
+	// 不携带它；这里把 Calls 带进报告，是为了让监控不必跨查 metrics
+	// 就能分辨上面两种情况。见 ADR-0002 §「PairsChecked == 0 是歧义的」。
+	Calls int
 }
 
 // SelfCheck 做一次隔离自检。
@@ -591,6 +608,9 @@ func (p *Pool) SelfCheck() (SelfCheckReport, error) {
 	if p.isClosed() {
 		return rep, ErrClosed
 	}
+	// 进入正常执行路径：本次自检确实跑过。早退（如上面已关闭）则
+	// 保持 Calls == 0，使"没跑"与"跑了但无对可比"在报告里可被区分。
+	rep.Calls = 1
 	totalPairs := 0
 	for _, s := range p.shards {
 		n := len(s.List())
@@ -610,6 +630,7 @@ func (p *Pool) SelfCheck() (SelfCheckReport, error) {
 		rep.Exhaustive = false
 	}
 	p.checked.Add(int64(rep.PairsChecked))
+	p.calls.Add(1)
 
 	// 第二层：声明扫描。它与上面的两两比对看的是**不同的东西**，
 	// 因此不是重复劳动——
@@ -669,6 +690,10 @@ func (p *Pool) crossShardCheck() error {
 
 // Checked 返回累计比较过的租户对数（指标用）。
 func (p *Pool) Checked() int64 { return p.checked.Load() }
+
+// Calls 返回累计的自检调用次数。它与 Checked()（累计比较过的对数）分开计，
+// 使监控能区分"自检跑过但无可比对"与"自检压根没跑"。
+func (p *Pool) Calls() int64 { return p.calls.Load() }
 
 // Stats 返回全池状态。
 func (p *Pool) Stats() []Stats {
