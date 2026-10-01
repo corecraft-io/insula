@@ -1,6 +1,6 @@
 # ADR-0007 先修 O(N)，再谈规模
 
-- **状态**：Proposed（仅剩第 4 处未修，且 insula 不使用 cordis 事件；第 2 处已于 2026-10-01 修掉，见下方「更新」）
+- **状态**：Accepted（验收条件「五处退化都有界或被修」已满足：#1 有界、#2/#3/#5 已修；#4 因 insula 不使用 cordis 事件而 N/A，纪律保留于 `BENCHMARK.md` 第 4 处。第 2 处 2026-10-01 修掉后经 cordis v0.3.0 + insula v0.1.0 发货，见下方「更新」）
 - **记录日期**：2026-09-18
 - **落实于**：`BENCHMARK.md`、`tenant`、`caps`、`cmd/insula`，以及 **cordis 侧**的索引改造
 
@@ -259,6 +259,26 @@ tag 列为仓库 TODO（见 `BENCHMARK` 之外的工作项）。在 `go.work` �
 仅剩第 4 处（cordis 事件 `hooksOf`，insula 不使用）未修——该通路不在平台热路径上，纪律保留在
 `BENCHMARK.md` 第 4 处退化里。第 2 处这个「转 Accepted 的最后前置」已消除；是否就此转 Accepted
 只取决于第 4 处这条不适用于本平台的项要不要算数。
+
+### 2026-10-01（续）—— 第 2 处经 tag 发货，状态转 Accepted
+
+上一段落下的「待打 cordis tag」已执行完毕，于是 #2 修复正式进入发布图：
+
+- **cordis v0.3.0**（annotated tag，指向 `cad33c5` = #2 O(1) 修复）已推送到 `corecraft-io/cordis`。
+- **insula 发布图**：`go.mod` 的 cordis 依赖由 `v0.2.0` 升到 `v0.3.0`，`GOWORK=off GOPROXY=direct GOSUMDB=off go mod tidy` 校验 `go.sum`；发布图下 `go build` / `go vet` / `go test -race ./...` 全绿。
+- **insula v0.1.0**（首个 tag，annotated）已推送到 `corecraft-io/insula`，其 `go list -m github.com/corecraft-io/insula@v0.1.0` 经 `GOPROXY=direct` 从 VCS 解析成功。下游消费者现在无需 `go.work` 即可拿到 #2 修复。
+
+**验收条件复核。** 「五处退化都有界或被修」逐项：
+
+| 退化 | 处置 | 状态 |
+| --- | --- | --- |
+| ① `App.Wait` 全量扫描 | 批量提交，每批至多一次 `Wait`（ADR-0003 量级 0.1–0.25 ms/分片，可接受） | 有界 |
+| ② `Runtime.remove` slice splice | 2026-10-01 修于 cordis 本体（位置索引 + swap-with-tail，O(1)），已随 cordis v0.3.0 / insula v0.1.0 发货 | 已修 |
+| ③ `Reflect.untrack` slice splice | 2026-09-27 修（倒排索引按隔离域分桶） | 已修 |
+| ④ 事件 `hooksOf` | **N/A**：insula 零 cordis 事件总线调用（grep 实证：仅 `caps/caps_bench_test.go:8` 一句注释声明「insula 一行 cordis 的 Emit/On 都没用」，其余 `Emits` 都是 SSE/指标渲染的测试函数名）。该通路的 O(N) 不在平台热路径上，纪律保留于 `BENCHMARK.md` 第 4 处退化 | 不适用 |
+| ⑤ `EntryTree.Resolve` O(N²) | 2026-09-30 修于 insula 侧（`Root().Children()` 建快照映射） | 已修 |
+
+五项条件全部满足（#4 以「平台不适用」闭环，而非「留一个未修的尾巴」）。**状态由 Proposed 转 Accepted。** 这也是本 ADR 待办清单的最后一项；其余工作（#1–#3、#5 的修复与基准）早已落地并经 CI/发布图校验。
 
 ## 相关
 

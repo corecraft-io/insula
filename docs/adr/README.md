@@ -52,7 +52,7 @@ time.
 | [0004](0004-request-scope-stays-in-go-context.md) | 请求级隔离走 Go `context.Context`，不进 cordis | Accepted |
 | [0005](0005-tenant-identity-is-an-explicit-parameter.md) | 租户身份是必传参数，不是从上下文推导的隐式值 | Accepted |
 | [0006](0006-untrusted-code-runs-out-of-process.md) | 不可信代码必须进程外执行 | Accepted |
-| [0007](0007-fix-on-first.md) | 先修 O(N)，再谈规模 | Proposed（部分落地） |
+| [0007](0007-fix-on-first.md) | 先修 O(N)，再谈规模 | Accepted |
 
 ## How the seven relate
 
