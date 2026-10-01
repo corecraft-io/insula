@@ -297,6 +297,75 @@ func TestProvisionDetectsSilentlySkippedChildEntry(t *testing.T) {
 	}
 }
 
+// 装配校验改用「根子节点快照 + 查表」代替逐次 Resolve，第 5 处退化因此从
+// O(N²) 降到 O(N)。这个替换的正确性全赖一件事：**两者必须给出同一个
+// *Entry**。它不是"顺理成章"的——只要 cordis 哪天让 Children() 返回重建的
+// 对象、或不再反射树的最新结构，映射就会静默地指向另一个东西，而开通照样
+// 成功。所以这里把三个支点逐个钉住，而不是假设它们成立。
+//
+// 这条测试不是为了覆盖率，是为了让下一次改 cordis 的人先看到红色。
+func TestAssemblyCheckIsEquivalentToResolve(t *testing.T) {
+	h := newHarness(t)
+	ids := []ident.Tenant{"tenant-a", "tenant-b", "tenant-c"}
+
+	specs := make([]tenant.Spec, 0, len(ids))
+	for _, id := range ids {
+		specs = append(specs, h.spec(string(id)))
+	}
+	if err := h.man.Provision(specs); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	for _, id := range ids {
+		tk, ok := h.man.Get(id)
+		if !ok {
+			t.Fatalf("tenant %s was not registered", id)
+		}
+
+		var (
+			resolved, snapshot *cordis.Entry
+			resolveErr         error
+		)
+		// 两侧必须在**同一个 DoSync**里取。拆成两次的话，中间可能有别的调度
+		// 改动了树，那时"两侧相等"说明不了任何事——我们要断言的是等价，
+		// 不是运气。
+		if !h.app.DoSync(func(*cordis.Context) {
+			resolved, resolveErr = h.tree().Resolve(tk.EntryID)
+			for _, e := range h.tree().Root().Children() {
+				if e.ID() == tk.EntryID {
+					snapshot = e
+					break
+				}
+			}
+		}) {
+			t.Fatal("shard stopped")
+		}
+		if resolveErr != nil {
+			t.Fatalf("tenant %s: Resolve(%s): %v", id, tk.EntryID, resolveErr)
+		}
+		if snapshot == nil {
+			t.Fatalf("tenant %s: root children do not contain %s", id, tk.EntryID)
+		}
+
+		// 支点 1、2：快照里的就是 Resolve 会给的那个对象。
+		if resolved != snapshot {
+			t.Fatalf("tenant %s: snapshot entry %p != resolved entry %p", id, snapshot, resolved)
+		}
+		// 子组是校验实际读的东西，一并钉住它在两条通路上也一致。
+		if sgResolved, sgSnapshot := resolved.Subgroup(), snapshot.Subgroup(); sgResolved != sgSnapshot {
+			t.Fatalf("tenant %s: subgroup %p != %p", id, sgSnapshot, sgResolved)
+		}
+
+		// 结构性前提：租户必须是根组的**直接**子节点，映射才可以只扫一层。
+		// 这条一旦破（例如把租户挪进某个子组），Root().Children() 建的映射
+		// 就不再等价于 Resolve，而开通会继续"成功"。
+		if resolved.ID() != tk.EntryID || strings.Contains(tk.EntryID, ":") {
+			t.Fatalf("tenant %s: entry %s resolves to %q, want a single-segment root child",
+				id, tk.EntryID, resolved.ID())
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 隔离
 // ---------------------------------------------------------------------------

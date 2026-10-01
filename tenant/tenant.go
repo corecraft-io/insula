@@ -498,17 +498,56 @@ func (m *Manager) createEntries(t *Tenant) error {
 // 数量不符几乎总意味着有人造了撞车的短 ID。
 //
 // 返回装配不完整的租户列表，调用方负责回滚。
+//
+// ### 为什么这里不调 Tree().Resolve（第 5 处退化）
+//
+// 租户入口是**根组的直接子节点**（createEntries 传 parent=""），所以
+// Resolve 的路径只有一段，它做的正是在 root.children 里线性找第一个
+// options.ID == EntryID 的入口。每租户调一次 ⇒ 整批 O(N²)，而这恰好
+// 落在开通路径上：N=10000 的一个剖面里 `EntryTree.Resolve` 占 5.22%，
+// 调用者 100% 是这里（见 BENCHMARK.md 门禁一）。
+//
+// 改为**一趟**遍历根子节点建映射后查表。等价性有三个支点，缺一个这条
+// 替换就不成立：
+//
+//  1. `EntryGroup.Children()` 返回的是同一个 `*Entry` 指针的副本 slice，
+//     不是重建的对象（loader.go 的 `Children` 就是一次 copy）；
+//  2. 这些 `*Entry` 与 `Resolve` 的返回值是同一个对象——`Create` 把一个
+//     指针同时放进 store 与 children，`Resolve` 找到后原样返回；
+//  3. 重复短 ID 保留**配置序上的第一个**，与 `Resolve` 命中后 `break`
+//     的行为一致。
+//
+// 一条刻意的差异（更严）：旧实现给每个租户各做一次 Resolve，中间穿插的
+// 并发树变更会让各租户看到不同时刻的树；新实现是一张快照，整批看到同一
+// 时刻。这也顺带让"有人在我们背后把这棵子树摘了"这一路保持旧语义——
+// 快照里查不到 ⇒ 与 Resolve 报 ErrEntryNotFound 一样判为装配不完整，
+// 而不是拿着一个已被摘掉的 `*Entry` 假装通过。
+//
+// 断言见 tenant_test.go 的 TestAssemblyCheckIsEquivalentToResolve。
 func (m *Manager) verifyAssembly(created, failed []*Tenant) []*Tenant {
 	var short []*Tenant
+	if len(created) == 0 {
+		return nil
+	}
+
+	byID := make(map[string]*cordis.Entry, len(created))
+	for _, e := range m.d.Loader.Tree().Root().Children() {
+		id := e.ID()
+		if _, dup := byID[id]; dup {
+			continue
+		}
+		byID[id] = e
+	}
+
 	for _, t := range created {
 		if containsTenant(failed, t) {
 			continue
 		}
 		reason := ""
-		e, err := m.d.Loader.Tree().Resolve(t.EntryID)
+		e, ok := byID[t.EntryID]
 		switch {
-		case err != nil:
-			reason = fmt.Sprintf("entry %s not resolvable: %v", t.EntryID, err)
+		case !ok:
+			reason = fmt.Sprintf("entry %s not present in the root group", t.EntryID)
 		case e.Subgroup() == nil:
 			// 分组插件的 Apply 没跑完或失败了。这等于整棵子树没建起来。
 			reason = fmt.Sprintf("entry %s carries no subgroup (group plugin did not apply)", t.EntryID)
