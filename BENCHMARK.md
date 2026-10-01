@@ -154,16 +154,22 @@ above tell you to avoid. Do not read a number off a CI run and call it a
 regression. Bring it back to a local machine and follow the five rules.
 
 CI checks out this repository only. `cordis` is an ordinary published dependency
-(`require github.com/corecraft-io/cordis v0.2.0`), so the runner resolves it through
+(`require github.com/corecraft-io/cordis v0.4.0`), so the runner resolves it through
 the module proxy exactly as any other consumer would. The workflow asserts that no
 `replace` directive reappears in `go.mod`, because such a directive is honoured
 only in the *main* module: it would be silently ignored by every downstream
 consumer and would break `go install …@latest`. To hack on both repositories at
 once, use a `go.work` above the two checkouts — see `AGENTS.md` § Dependencies.
 
+> **Keep the version in these sentences true.** They are the reason a reader
+> believes the rest of this file: if the prose says `v0.2.0` while `go.mod` says
+> something else, then "measure with the workspace on or off" silently points at
+> a version nobody is running. The `v0.2.0` → `v0.4.0` bump is exactly the case
+> where this bites — two releases went out with the prose stale.
+
 One consequence matters for benchmarking. If a cordis change is *the point* of
 your work, run the gates with the workspace active (the default when you are
-inside `corecraft-io/`); otherwise you are measuring the published `v0.2.0` and not
+inside `corecraft-io/`); otherwise you are measuring the published `v0.4.0` and not
 your edit. `GOWORK` is the switch: `go env GOWORK` prints the file when it is
 loaded, and `GOWORK=off` puts you back on the published graph.
 
@@ -486,7 +492,8 @@ task count. It is O(total fibers), not O(queue length).
 | 10 000 | 120 000 | 11.5 | 11.1 |
 
 At 24 000 fibers this is ~84 µs — acceptable. The jump to ~11 ns/fiber at
-N=10000 is a cache effect (300 MB working set), not an algorithmic change. Read
+N=10000 is a cache effect (~347 MB working set at 34.7 KB/tenant), not an
+algorithmic change. Read
 medians: a snapshot repeat occasionally lands on a 21 or a 55 ns/fiber outlier, so
 the *minimum* over a handful of runs is meaningless here.
 
@@ -574,33 +581,40 @@ would make this curve *fast* while being wrong.
 
 | N | fibers | bytes | bytes/tenant |
 | --- | --- | --- | --- |
-| 1 | 12 | 31 592 | 31 592 |
-| 100 | 1 200 | 3 070 304 | 30 703 |
-| 1 000 | 12 000 | 30 377 424 | 30 377 |
+| 1 | 12 | 37 448 | 37 448 |
+| 100 | 1 200 | 3 489 856 | 34 898 |
+| 1 000 | 12 000 | 34 747 824 | 34 748 |
 
-**A tenant is exactly 12 fibers and ~30 KB resident**, flat across 1000× scale.
-That number is the denominator for shard sizing: 2 000 tenants ≈ **60 MB** per
+Measured on cordis **v0.4.0**. On v0.3.0 the same table read 31 592 / 30 703 /
+30 377 bytes/tenant — the tenant got **~14% heavier** in that release (its
+logging and event subsystems now hang per-fiber state off the runtime), while
+the fiber count stayed at exactly 12. Re-measure this table on any cordis bump;
+do not carry the number forward.
+
+**A tenant is exactly 12 fibers and ~34.7 KB resident**, flat across 1000× scale.
+That number is the denominator for shard sizing: 2 000 tenants ≈ **69.5 MB** per
 shard of pure fiber footprint, before session state, histories, and connection
 pools.
 
 This file previously printed ≈ 6 MB there. That is off by **10×**, and it
-disagreed with both of its own neighbouring tables — 30 377 bytes/tenant eleven
-lines above, and "10 000 tenants ≈ 300 MB" eleven lines below. It was also the
-single highest-impact number in the file, because it is the one a capacity
-planner copies out. Arithmetic that can be checked against the file's own tables
-is worth checking.
+disagreed with both of its own neighbouring tables — the bytes/tenant figure
+eleven lines above, and the 10 000-tenant figure below. It was also the single
+highest-impact number in the file, because it is the one a capacity planner
+copies out. Arithmetic that can be checked against the file's own tables is
+worth checking. (Those two figures were 30 377 bytes/tenant and "≈ 300 MB" when
+this was written under cordis v0.3.0; both have since been re-measured.)
 
 Derived rules:
 
 | Quantity | Value | Basis |
 | --- | --- | --- |
 | Fibers per tenant | 12 | measured, flat |
-| Resident bytes per tenant | ~30 KB | measured, flat |
+| Resident bytes per tenant | ~34.7 KB | measured on cordis v0.4.0, flat |
 | Fibers per shard | ≤ 2 000 tenants = 24 000 | `Wait()` at 24 000 fibers ≈ 84 µs |
-| Resident bytes per shard | ≤ 2 000 tenants ≈ 60 MB | 30.4 KB/tenant measured, flat |
-| Teardown per tenant | ≈ 6.5 µs + 1.15 ns × N | Gate 2; at 2 000 tenants the second term is ~26% of the operation |
+| Resident bytes per shard | ≤ 2 000 tenants ≈ 69.5 MB | 34.7 KB/tenant measured, flat |
+| Teardown per tenant | ≈ 6.1 µs at N=100, ≈ 10.8 µs at N=10 000 | Gate 2 on cordis v0.4.0; **~12% slower than v0.3.0 at every N, with the same ~N^0.12 exponent** — a constant factor, not a new slope |
 | Shard count | 4 – 8 | bounds blast radius and keeps `Load` `Resolve` scans short. The scheduler is single-threaded but its work is µs-scale, so sharding is not about CPU |
-| 10 000 active tenants | 120 000 fibers, ~300 MB | 5 shards → 24 000 fibers each, right at the comfort limit |
+| 10 000 active tenants | 120 000 fibers, ~347 MB | 5 shards → 24 000 fibers each, right at the comfort limit |
 
 Shard count and hot/cold tenant policy are the two tuning parameters here.
 Everything else in this file describes invariants.

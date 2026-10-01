@@ -280,6 +280,53 @@ tag 列为仓库 TODO（见 `BENCHMARK` 之外的工作项）。在 `go.work` �
 
 五项条件全部满足（#4 以「平台不适用」闭环，而非「留一个未修的尾巴」）。**状态由 Proposed 转 Accepted。** 这也是本 ADR 待办清单的最后一项；其余工作（#1–#3、#5 的修复与基准）早已落地并经 CI/发布图校验。
 
+### 2026-10-01（再续）—— cordis 升到 v0.4.0，验收条件在新依赖上复核
+
+cordis v0.3.0 → **v0.4.0**（5 个提交、+4 159 行）：events/loader/registry 三处向 TS 参考实现对齐、
+新增 logger 子系统、`internal/get` `internal/set` `internal/dispatch` 三个扩展点、`Fiber.Update`
+与 `OnUpdate` 签名变更、`Plugin.Simplify`、`${env:NAME}` 配置插值。这是一次**语义级**升版，
+不是纯增量，因此本 ADR 的验收条件必须在它上面重新过一遍。
+
+**接触面核查（逐项，而不是「编译过了就算」）：**
+
+| 变更 | insula 的接触情况 | 判定 |
+| --- | --- | --- |
+| `App.Wait()` | v0.3.0 与 v0.4.0 的实现**逐字相同**；新增的 `Tree.Wait()` / `Loader.Wait()` 只是它的转发 | 无需改动，也不要为了「用新 API」而换 |
+| `Context.Get` / `Set` | 签名不变；桶为空时直接走 `lookup`（原逻辑重命名），insula 零事件注册，所以 `internal/get` 链永远跳过 | 无影响 |
+| `Fiber.Update` / `OnUpdate` | `gateway.Publish` 调 `Update(nil)` 迫使重新求值 check；v0.4.0 里 `restart()` 仍在 waterfall 的 terminal 内 | 语义保持；顺带获得「钩子 panic 转成 error 而非杀掉调度器 goroutine」 |
+| `internal/*` 事件与 `ListenOptions.Global` | insula 零监听器 | 无影响（且不订阅即零开销） |
+| `${env:NAME}` 插值 | insula 的配置是 Go 结构体，全仓无 `${` | 无影响 |
+| `Plugin.Simplify` / `Builtins` | insula 不设置 | 无影响 |
+| 旧 `Logger`（三函数）被 `LoggerService` 取代 | insula 从不使用它 | 无影响 |
+
+**同机同配方实测**（`GOGC=off -benchtime 1x -count 5 -cpu 4`，取中位数；v0.3.0 与 v0.4.0 各跑一轮）：
+
+| 基准 | v0.3.0 | v0.4.0 | 变化 |
+| --- | --- | --- | --- |
+| 开通 ns/租户（N=1000） | 17 206 | 19 607 | +14.0% |
+| 注销 ns/租户（N=10 000） | 9 589 | 10 773 | +12.3% |
+| `WaitScan` ns/fiber（N=10 000） | 11.9 | 12.5 | +4.4% |
+| 域内扇出 ns/订阅方（K=1000） | 633 568 | 712 683 | +12.5% |
+| 跨域 notify（R=10 000） | 52 364 | 52 598 | +0.4% |
+| **bytes/tenant（N=1000）** | **30 821** | **34 748** | **+12.7%** |
+
+读法：**均匀 +9%~+14% 的常数因子，指数结构不变**——注销的拟合指数 N^0.119 → N^0.123，开通仍近似
+常数。上游在自己的 README 里也记了同类代价（churn 78 → 113 ns，1.45×），方向一致。因此
+**验收条件「五处退化都有界或被修」继续成立**：没有出现新的斜率，涨的是一个乘数。
+
+一处诚实的旁注：v0.3.0 这次实测量到 30 821 B/租户，而 `BENCHMARK.md` 表格记的是 30 377——
+同版本内 1.5% 的波动。所以「+12.7%」这个判断成立的前提是它远大于该波动；而 `BENCHMARK.md`
+里的 30 377 → 34 748（+14%）用的是文档原值，与本次实测的 +12.7% 是同一件事的两种算法。
+
+**唯一需要动手的地方**是 v0.4.0 新增的 `LoggerService`：它的默认出口是进程 stderr，而它承载的
+正是「入口 apply 失败 / 配置校验失败 / dispose panic / update 钩子出错 / wait 未收敛」这几条
+静默失败。insula 在 `newShard` 里把它接到平台自己的 `OnWarn`（`wireCordisLogger`），只转发 Warn
+及以上——否则运维面前会有两条互不相干的日志流，而 `wait` 未收敛在 insula 侧正是「这批租户没装
+起来」的直接原因。该接线有两个回归测试（单元守形状与级别过滤，集成守每个分片都真接了线），
+均已用变异验证过各自只翻红对应的一项。
+
+**状态维持 Accepted。**
+
 ## 相关
 
 - [ADR-0001](0001-cordis-is-the-control-plane.md) —— 本条的代价来源。

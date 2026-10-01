@@ -19,10 +19,10 @@ permissions:
 #
 # 曾经的布局是「两次 checkout」（把 cordis 检出到兄弟目录），
 # 那是 `replace cordis => ../cordis` 的代价。既然依赖改成 go.mod 里
-# `require github.com/corecraft-io/cordis v0.2.0`，cordis 就由模块代理提供，
+# `require github.com/corecraft-io/cordis v0.4.0`，cordis 就由模块代理提供，
 # 兄弟目录不再需要，也不再允许回来（见下面 module declaration 那一步）。
 #
-# 前置条件：cordis 上必须有对应的 tag（v0.2.0）。tag 不存在时 `go build`
+# 前置条件：cordis 上必须有对应的 tag（v0.4.0）。tag 不存在时 `go build`
 # 会在 `missing go.sum entry` 上失败——这是正确行为，不是 CI 的缺陷。
 # ---------------------------------------------------------------------------
 

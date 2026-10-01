@@ -39,7 +39,7 @@ legitimate, but it means writing a new ADR, not editing the old one.
 `cordis` is an ordinary published dependency, not a sibling checkout:
 
 ```
-require github.com/corecraft-io/cordis v0.2.0
+require github.com/corecraft-io/cordis v0.4.0
 ```
 
 It is the only one, and adding a second needs a conversation first — the point of
