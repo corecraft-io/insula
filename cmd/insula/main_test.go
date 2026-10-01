@@ -139,15 +139,21 @@ func TestIsLoopbackAddr(t *testing.T) {
 	}
 }
 
-// TestMetricFamiliesParsesBareSamples 守住指标族的解析。
+// TestMetricFamiliesSkipsHeaderLines 守住指标族的解析。
 //
-// 当前 Render 输出的是裸样本行（没有 # HELP / # TYPE 头）。若哪天它
-// 加上了头，这个解析必须继续正确——否则 demo 报的族数会突然变成 0，
-// 而那种"看起来什么都没坏"的错误最难被发现。
-func TestMetricFamiliesParsesBareSamples(t *testing.T) {
+// Render 现在每族都输出 # TYPE / # HELP 头，所以这个解析必须**跳过**它们：
+// "# TYPE insula_runs_started counter" 不是样本行，把它当成指标名会让
+// demo 报出一堆以 "#" 开头的假族。
+//
+// 这里同时钉住另一半：解析只认样本行，因此"头缺失"不会让族数变成 0
+// ——那种"看起来什么都没坏"的错误最难被发现。
+func TestMetricFamiliesSkipsHeaderLines(t *testing.T) {
 	render := strings.Join([]string{
+		`# TYPE insula_runs_started counter`,
+		`# HELP insula_runs_started Agent runs started.`,
 		`insula_runs_started{tenant=""} 3`,
 		`insula_runs_started{tenant="a"} 1`,
+		`# TYPE insula_isolation_breaches counter`,
 		`insula_isolation_breaches{tenant="a"} 0`,
 		"",
 		`insula_untouched 5`,

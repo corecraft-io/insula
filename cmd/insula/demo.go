@@ -378,12 +378,13 @@ func hasDeniedIsolation(events []audit.Event) bool {
 	return false
 }
 
-// metricFamilies 取渲染文本里出现过的指标名（去重、升序）。
+// metricFamilies 取渲染文本里**带样本**的指标名（去重、升序）。
 //
-// 解析而不是数 "# TYPE"：当前 Render 只输出裸样本行，不带 HELP / TYPE 头。
-// 那是合法的 exposition 格式（缺 TYPE 即 untyped），但也意味着任何靠 TYPE
-// 头来发现指标族的工具在这里都会看到零个 —— demo 想做的正是别让这件事
-// 被一个漂亮的"12 个族"数字掩盖过去。
+// 它数的是样本行、跳过 "# " 开头的元数据行，因此结果与"头存不存在"无关。
+// Render 现在每族都输出一次 # TYPE / # HELP（那件事由 metrics 包自己的
+// TestRenderEmitsTypeAndHelpHeaders 守着），但这里**刻意不靠头来发现指标族**：
+// 把发现方式绑在头上，头一旦缺失，族数会静默变成 0 —— 那种"看起来什么都没坏"
+// 的错误正是 demo 最该拦住的一种。
 func metricFamilies(render string) []string {
 	seen := map[string]bool{}
 	var out []string
