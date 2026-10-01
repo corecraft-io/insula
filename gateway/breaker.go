@@ -150,9 +150,13 @@ func (b *Breaker) Success() {
 // false，池再也无法通过真实流量自愈。这比「被熔掉」更糟——熔断至少
 // 会自己恢复。
 //
-// 归还而不是 Reset：Reset 直接把状态推到 Closed，等于在没有验证过上游
-// 的情况下把依赖者放回来。归还探测额度保留 HalfOpen，下一次调用可以
+// 归还而不是强制闭合：强制闭合会把状态直接推到 Closed，等于在没有验证过
+// 上游的情况下把依赖者放回来。归还探测额度保留 HalfOpen，下一次调用可以
 // 继续探测；凭证一旦修好，第一次真正打到上游的探测就会闭合熔断器。
+//
+// 本类型**刻意不提供**那个强制闭合的入口（它曾经存在，叫 Reset，已删）。
+// 理由见 AGENTS.md 的「预占必须归还」：它在代码路径上是错的，而它在运维
+// 路径上的用途需要一条带审计的运维门面，本仓库没有那条门面。
 //
 // 在 Closed 状态下调用它是安全的空操作（此时没有探测额度这回事）。
 // 在 Open、或 HalfOpen 且探测已被**别人**占用时不要调用它：那会放行出
@@ -194,15 +198,4 @@ func (b *Breaker) Failures() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.failures
-}
-
-// Reset 强制回到 Closed（供运维手工恢复）。
-func (b *Breaker) Reset() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	from := b.stateLocked(b.clock())
-	b.failures = 0
-	b.openedAt = time.Time{}
-	b.halfFlight = false
-	b.transition(from, StateClosed)
 }

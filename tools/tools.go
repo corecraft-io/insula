@@ -368,17 +368,6 @@ func (r *Registry) Call(ctx context.Context, inv caps.Invocation) (caps.ToolResu
 	return e.handler.Call(ctx, inv)
 }
 
-// Names 返回白名单内的工具名（升序），供装配期的诊断与断言。
-func (r *Registry) Names() []string {
-	specs := r.Specs()
-	out := make([]string, 0, len(specs))
-	for _, s := range specs {
-		out = append(out, s.Name)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // Allowed 报告某工具是否在白名单内（供测试与装配断言）。
 func (r *Registry) Allowed(name string) bool {
 	r.mu.RLock()

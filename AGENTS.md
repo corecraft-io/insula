@@ -25,8 +25,10 @@ routing, isolation, or shutdown path is broken.
 
 ## Where the decisions come from
 
-This repository has seven recorded architecture decisions in
-[`docs/adr/`](docs/adr/README.md). Read them before proposing a change that
+This repository has eight recorded architecture decisions in
+[`docs/adr/`](docs/adr/README.md) — seven `Accepted` and one `Proposed`
+([ADR-0008](docs/adr/0008-hot-and-cold-tenants.md), idle-tenant reclamation,
+which is **not implemented**). Read them before proposing a change that
 touches any of the boundaries below — most of the "why not the obvious
 alternative" answers are already written down there, along with the cost each
 decision accepted. If you find yourself wanting to reverse one, that is
@@ -148,10 +150,20 @@ Two consequences worth spelling out:
   budget" when the real answer is "the pool is down".
 - A failure that never reached the upstream must **not** be reported to the
   breaker (`Breaker.Failure`), but the probe still has to come back. That is what
-  `ReleaseProbe` is for: `Reset` is wrong (it closes the breaker without having
-  verified the upstream) and `Failure` is wrong (it re-opens the pool over a
-  local config error). Skip it and the breaker wedges in HalfOpen forever —
-  strictly worse than being open, because open at least heals itself.
+  `ReleaseProbe` is for. `Failure` is wrong here (it re-opens the pool over a
+  local config error), and so is forcing the breaker back to `Closed`: that lets
+  the dependants in without ever having verified the upstream.
+
+  This repository used to export exactly that force-close, as `Breaker.Reset`. It
+  was **removed, not fixed**. Its two conceivable callers are "unwedge a leaked
+  probe" — which is `ReleaseProbe` — and "let an operator override the breaker" —
+  which needs an operator surface and an audit trail, neither of which exists in
+  this repository. An exported method that is only reachable by being typed
+  wrongly is worse than an absent one, because the next person looking for a way
+  out will find it. Do not add it back.
+
+  Skip the refund and the breaker wedges in HalfOpen forever — strictly worse
+  than being open, because open at least heals itself.
 
 ### Enforcement is structural, not conventional
 
