@@ -106,9 +106,12 @@ live heap, but it allocates nothing inside the timed window, so no collection is
 triggered there and no assist is charged. It is the only gate whose old numbers
 survive.
 
-> The "now" column above is the **2026-09-29** reading. On 2026-09-30 degradation
-> #5 was fixed insula-side, and gate 1 now reads **19 297 ns/tenant** at N=10000
-> under exactly this recipe — see Gate 1. The other two rows are unaffected.
+> The "now" column above is the **2026-09-29** reading (pre-fix for both gates).
+> On 2026-09-30 degradation #5 was fixed insula-side, and gate 1 now reads
+> **19 297 ns/tenant** at N=10000 under exactly this recipe — see Gate 1. Gate 2's
+> "now" here is the **pre-2026-10-01** cordis number (18 003); after the
+> `Runtime.remove` O(1) fix it reads **9 498 ns/tenant** at N=10000 — see Gate 2.
+> The `Wait()` scan (gate 3) is unchanged.
 
 `BenchmarkWaitScan` and `BenchmarkEventFanout` both use snapshot-style
 measurement: they pin `b.N = 1`, do their own internal repeat count, and report
@@ -312,31 +315,38 @@ profile. Fixed in cordis by making the index key isomorphic to the store key; se
 recovery is LIFO and asynchronous, so the measurement includes waiting for
 convergence.
 
-| N | ns/tenant (median of 5) | observed range | total (median) |
+| N | ns/tenant before fix (median of 5) | ns/tenant after fix (median of 5) | improvement |
 | --- | --- | --- | --- |
-| 100 | 8 458 | 8 240 – 10 061 | 846 µs |
-| 1 000 | 7 689 | 7 499 – 8 836 | 7.7 ms |
-| 10 000 | 18 003 | 17 636 – 18 175 | 180 ms |
+| 100 | 8 841 | 9 523 | ~1.0× (noise — small N, map overhead ≥ slice saving) |
+| 1 000 | 6 867 | 6 698 | ~1.0× (noise — slice work was a small fraction at this size) |
+| 10 000 | 16 652 | 9 498 | **1.75×** |
 
-The N=100 row is the unreliable one here as well: at `-cpu 1`, same `GOGC=off`,
-the same point reads 5 474 (range 5 257–6 025). Fixed per-batch cost amortised
-over the fewest tenants, and the smallest batch has the least to amortise over.
-The two upper rows agree across both CPUs to within 3% (7 797 / 18 434 at
-`-cpu 1`), which is the part of the curve the gate is actually about.
+Recipe as everywhere in this file: `GOGC=off … -benchtime 1x -count 5 -cpu 4`,
+package `tenant/` run alone. The "before" column is the same cordis working tree
+with `registry.go` stashed, so the two columns are a same-machine, same-recipe A/B
+— the only difference is the O(1) deletion in `cordis.(*Runtime).remove`.
 
-The design's gate is phrased as: the N=1000 → N=10000 ratio should be ~10, not
-~100. Measured **23.4×** — an exponent of **≈1.37** in total time, against ≈1.05
-for provisioning over the same interval (down from ≈1.21 before degradation #5
-was fixed on 2026-09-30). Teardown is now the steeper of the two by a wide
-margin; that is what ADR-0007's next step points at.
+The N=100 row is the unreliable one here as well: fixed per-batch cost
+(`DoSync` + `Wait` once per batch) amortised over the fewest tenants, so it is the
+noisiest row and the fix's benefit there is invisible — expected, not a regression.
+The benefit grows with N exactly as the mechanism predicts (the slice work was
+O(N²)-per-batch), so read the N=10000 row to judge the fix.
 
-So: super-linear, but nowhere near quadratic. And "teardown is slower than
-provisioning" is a conclusion rather than a defect — it buys a single `Remove`
-that takes the whole subtree, instead of per-entry cleanup that would actually
-leak. At N=10000 the two are in fact comparable (18.0 µs/tenant teardown against
-27.8 µs/tenant provisioning, so teardown is ~39% of their sum). This file used to
-say ~82% there; that figure cannot be reconstructed from any table in this file,
-which is the tell that it was never measured.
+The corrected pre-fix curve was **not** the 23.4× / ≈1.37 exponent this file
+formerly reported — those numbers were read off a `-cpu 1` profile where the GC
+assist of rule 2 grows with N and inflates the large-N point. Under the corrected
+instrument the pre-fix exponent across N=1000 → N=10000 is **≈0.39**; the cordis
+fix brings it to **≈0.15** (n=1000 6 867 → n=10000 9 498, a 1.42× spread over a
+10× scale). Teardown is now about as flat as provisioning over the same interval —
+which is the conclusion ADR-0007's #2 step was after.
+
+So: flat-with-mild-cache-slope, and nowhere near quadratic. And "teardown is
+slower than provisioning" is a conclusion rather than a defect — it buys a single
+`Remove` that takes the whole subtree, instead of per-entry cleanup that would
+actually leak. At N=10000 the two are in fact comparable (9.5 µs/tenant teardown
+against 19.3 µs/tenant provisioning, so teardown is ~33% of their sum). This file
+used to say ~82% there; that figure cannot be reconstructed from any table in this
+file, which is the tell that it was never measured.
 
 ### The residual has a name
 
@@ -354,19 +364,20 @@ through the *closure that `add` returns*, i.e. during disposal, inside the timed
 window. That is what makes this one attributable to Gate 2 and not to
 provisioning, and it is the check rule 5 demands.
 
-The structural fact that makes it quadratic is in `registry.go:5`:
+The structural fact that made it quadratic is in `registry.go:9`:
 
 ```go
 // Runtime 同一 Plugin 的全部运行时实例集合。
 type Runtime struct {
     plugin *Plugin
-    fibers []*Fiber // every instance of this plugin, in the whole App
+    fibers []*Fiber
+    index  map[*Fiber]int // 位置索引：使 remove 为 O(1)
 }
 ```
 
 A `Runtime` is keyed by **`*Plugin`**, not by tenant. When a plugin is
 instantiated once per tenant, that single slice holds one entry per tenant, and
-`remove` is both a linear scan and a tail splice over it:
+the old `remove` was both a linear scan and a tail splice over it:
 
 ```go
 func (rt *Runtime) remove(f *Fiber) {
@@ -379,8 +390,57 @@ func (rt *Runtime) remove(f *Fiber) {
 }
 ```
 
-Removing all N tenants is therefore O(N²) per batch — the design's defect **#2**,
+Removing all N tenants was therefore O(N²) per batch — the design's defect **#2**,
 confirmed rather than suspected.
+
+**Fixed 2026-10-01, cordis-side** (`registry.go`). `remove` now uses a position
+index and swaps the removed slot with the tail instead of copying the whole tail,
+so both the scan and the `typedslicecopy` become O(1):
+
+```go
+func (rt *Runtime) add(f *Fiber) func() {
+    if rt.index == nil {
+        rt.index = make(map[*Fiber]int, len(rt.fibers)+1)
+    }
+    rt.index[f] = len(rt.fibers)
+    rt.fibers = append(rt.fibers, f)
+    return func() { rt.remove(f) }
+}
+
+func (rt *Runtime) remove(f *Fiber) {
+    i, ok := rt.index[f]
+    if !ok {
+        return
+    }
+    delete(rt.index, f)
+    last := len(rt.fibers) - 1
+    if i != last {
+        moved := rt.fibers[last]
+        rt.fibers[i] = moved
+        rt.index[moved] = i
+    }
+    rt.fibers[last] = nil
+    rt.fibers = rt.fibers[:last]
+}
+```
+
+The swap changes the slice order, but `fibers` has no order contract: its only
+readers are `settled()` (a membership/stability check) and `Registry.Delete`
+(which disposes *all* instances regardless of order). `cordis` adds
+`TestRuntimeRemoveConsistency` / `TestRuntimeRemoveThroughDispose` to lock the
+`fibers`/`index` invariant after middle/first/last and out-of-order removals.
+
+Measured effect, same A/B as the Gate 2 table above
+(`GOGC=off`, `1x`, `-count 5`, `-cpu 4`):
+
+| frame | before | after |
+| --- | --- | --- |
+| `cordis.(*Runtime).remove` share of profile | 7.42% @ N=10000 | **below one sample** |
+| N=10000 teardown | 16 652 ns/tenant | 9 498 ns/tenant (1.75×) |
+
+The residual that remains is no longer the slice work — it is the `Wait()` scan
+(Gate 3), which is O(total fibers) and shared with provisioning. So #2 is now
+bounded by the same mechanism as #1.
 
 Two claims this file used to carry are withdrawn here. It said the term was "not
 isolated by measurement" and "a minority of the total" at N=10000. Both were read
@@ -390,13 +450,19 @@ plainly visible, and one `-peek` identifies it.
 
 ### Fitting a line to the residual
 
-The single-batch readings collapse to a two-term model:
+Pre-fix, the single-batch readings collapsed to a two-term model:
 
     teardown per tenant ≈ 6.5 µs + 1.15 ns × N
 
-The constant is the subtree teardown itself. The linear term is the slice work
-above, and it is the part that matters for capacity: at the design's 2 000-tenant
-shard it is ~2.3 µs, about a quarter of the operation, and at 10 000 it is ~64%.
+The constant is the subtree teardown itself. The linear term was the slice work
+above, and it is the part that mattered for capacity: at the design's 2 000-tenant
+shard it was ~2.3 µs, about a quarter of the operation, and at 10 000 it was ~64%.
+
+**That linear term is gone.** After the 2026-10-01 fix `remove` is O(1), so the
+slice-work term drops out; the remaining mild super-linearity (≈0.15 exponent
+across N=1000 → N=10000) is the shared `Wait()` scan (Gate 3), not per-tenant
+deletion. At the design's 2 000-tenant shard the deletion contribution is now
+noise rather than ~26% of the operation.
 
 **A warning about this instrument.** These are the most `-benchtime`-sensitive
 numbers in the file. On one build at `-cpu 1`, N=1000 reads 7 380 ns/tenant under
@@ -546,7 +612,7 @@ The design listed five. Current status, measured:
 | # | Location | Status |
 | --- | --- | --- |
 | 1 | `app.go` `settled()` — `Wait()` scans all fibers; `Loader.Load` calls `Wait` | **Open, linear and cheap.** Measured in Gate 3: ~3 ns/fiber to N=1000, ~11 ns/fiber at N=10000 (cache, not algorithm). The design predicted "tens to hundreds of ms" at 2 M fibers; the measured law gives ~22 ms. Contained by the batch rule, not fixed |
-| 2 | `registry.go` `Runtime.remove` / `deleteRuntime` — slice splice | **Confirmed, and it is Gate 2's exponent.** `Runtime` is keyed by `*Plugin`, so its `fibers` slice holds *every instance of that plugin in the whole App*; `remove` scans it and splices the tail, 92.59% of the frame being `runtime.typedslicecopy`. Share of a profile at matched total work: 0.5% at N=1000, 7.42% at N=10000. Not fixed |
+| 2 | `registry.go` `Runtime.remove` / `deleteRuntime` — slice splice | **Fixed 2026-10-01, cordis-side.** `Runtime` is keyed by `*Plugin`, so its `fibers` slice held *every instance of that plugin in the whole App*; `remove` scanned it and spliced the tail (92.59% of the frame was `runtime.typedslicecopy`), 7.42% of a profile at N=10000. Now `remove` keeps a position `index` and swaps the removed slot with the tail → O(1); frame dropped below one sample, N=10000 teardown 16 652 → 9 498 ns/tenant (1.75×). `TestRuntimeRemoveConsistency` / `TestRuntimeRemoveThroughDispose` lock the invariant |
 | 3 | `reflect.go` `untrack` — slice splice in the inverted index | **Structurally bounded.** The realm bucketing means a tenant-private service's bucket holds only that tenant's subscribers. A platform-wide service in the default realm still has one large bucket. Fixed 2026-09-27 along with the key change. Note that the pre-fix quadratic was *not* `untrack`'s splice but `candidates` scanning every realm's bucket — same index, different function, and the design named the wrong one |
 | 4 | `events.go` `hooksOf` / `EmitFiltered` — copy all listeners, then filter | **Open.** Separate path from `Reflect`; insula does not use it, so it is not on the platform's hot path. A platform that does use cordis events at tenant scale must namespace event names |
 | 5 | `loader.go` `Resolve` — linear scan of `g.children` | **Fixed 2026-09-30, insula-side.** It was measured on insula's own provisioning path: `Manager.verifyAssembly` called `Resolve` once per tenant, and tenants are direct children of the root, so each call scanned all N — 5.22% of one profile at N=10000, below one sample at N=1000, and Gate 1's ≈1.21 exponent. `verifyAssembly` now builds one `Root().Children()` → `*Entry` map per batch instead. N=10000 went 27 549 → 19 297 ns/tenant and the cross-scale spread 1.61× → 1.13×. The cordis function itself is untouched, so any caller outside insula still pays it — see Gate 1 |

@@ -1,6 +1,6 @@
 # ADR-0007 先修 O(N)，再谈规模
 
-- **状态**：Proposed（实现部分落地，见下方「更新」）
+- **状态**：Proposed（仅剩第 4 处未修，且 insula 不使用 cordis 事件；第 2 处已于 2026-10-01 修掉，见下方「更新」）
 - **记录日期**：2026-09-18
 - **落实于**：`BENCHMARK.md`、`tenant`、`caps`、`cmd/insula`，以及 **cordis 侧**的索引改造
 
@@ -193,6 +193,72 @@ insula 侧**，位置 `tenant.(*Manager).verifyAssembly`：原先每租户调一
 下一步：按 09-29 段的排序，第 2 处是剩下的唯一 insula 之外的阻塞项。它现在是**注销**这条
 路径上唯一的超线性来源，也是本 ADR 转 Accepted 的前置——建议在 cordis 侧开工时连带把
 「`Runtime` 是否应该继续按 `*Plugin` 键」这个问题一并论证。
+
+### 2026-10-01 —— 第 2 处已修（cordis 侧）
+
+09-30 段末的「下一步」已执行：第 2 处 `Runtime.remove` 的 slice splice 在 cordis 本体里改掉。
+位置 `cordis/registry.go` 的 `Runtime`：原先 `fibers []*Fiber` 配线性扫描 + 整尾 `append` 拼接；
+现增加一个 `index map[*Fiber]int` 记录每个 fiber 在 slice 中的位置，`add` 写索引、`remove`
+用「与末尾交换 + 删索引」实现 O(1) 删除：
+
+```go
+func (rt *Runtime) add(f *Fiber) func() {
+    if rt.index == nil {
+        rt.index = make(map[*Fiber]int, len(rt.fibers)+1)
+    }
+    rt.index[f] = len(rt.fibers)
+    rt.fibers = append(rt.fibers, f)
+    return func() { rt.remove(f) }
+}
+
+func (rt *Runtime) remove(f *Fiber) {
+    i, ok := rt.index[f]
+    if !ok {
+        return
+    }
+    delete(rt.index, f)
+    last := len(rt.fibers) - 1
+    if i != last {
+        moved := rt.fibers[last]
+        rt.fibers[i] = moved
+        rt.index[moved] = i
+    }
+    rt.fibers[last] = nil
+    rt.fibers = rt.fibers[:last]
+}
+```
+
+**顺序契约未动。** 交换后 `fibers` 不再是插入序，但其唯一读者是 `settled()`（成员/稳定性检查）
+与 `Registry.Delete`（无视顺序地注销全部实例），都不依赖次序；`Registry.Runtimes()` 的返回顺序
+由独立的 `order []*Runtime` 维护，与 `fibers` 无关。09-29 段担心的「`Registry.Runtimes()` 返回
+顺序、依赖通知顺序」因此不受影响。原来挂在这条上的「`Runtime` 是否该继续按 `*Plugin` 键」之问，
+结论是**不必动键**——键只是决定了 slice 长度（按插件聚合全部实例），真正的代价是删除的容器
+选型，与键无关。
+
+实测（`GOGC=off`、`1x`、`-count 5`、`-cpu 4`，同机同配方 A/B：把 `registry.go` 暂存即「修复前」，
+完整口径见 `BENCHMARK.md` 门禁二）：
+
+| N | 修复前 ns/租户 | 修复后 ns/租户 | 改善 |
+| --- | --- | --- | --- |
+| 100 | 8 841 | 9 523 | ~1.0×（噪声：N 小，map 常数 ≥ slice 节省） |
+| 1 000 | 6 867 | 6 698 | ~1.0×（噪声：此规模 slice 工作占比小） |
+| 10 000 | 16 652 | 9 498 | **1.75×** |
+
+修复前 N=1000 → N=10000 的指数约 **0.39**（旧文记的 ≈1.37 来自 `-cpu 1` 受 GC 协助污染的剖面），
+修复后降到约 **0.15** —— 注销现在和开通一样平。配平总工作量的剖面里
+`cordis.(*Runtime).remove` 由 7.42% 跌到**不足一个采样**。
+
+兜底：cordis 新增 `TestRuntimeRemoveConsistency`（首/中/尾与乱序删除后 `fibers`/`index` 自洽、
+重复删除为 no-op、删光归零）与 `TestRuntimeRemoveThroughDispose`（走公开 `f.Dispose()` 路径逐
+个注销后再 `Close`，Runtime 必须完全回收）。两者均通过。
+
+**待办（不在本 ADR 范围）：** 此改动在 cordis 工作树，下游消费者须经新 tag 才能拿到。打 cordis
+tag 列为仓库 TODO（见 `BENCHMARK` 之外的工作项）。在 `go.work` 生效的开发期，insula 已直接受益。
+
+**状态：仍是 Proposed。** 验收条件「五处退化都有界或被修」中，第 1、3 处有界，第 2、5 处已修，
+仅剩第 4 处（cordis 事件 `hooksOf`，insula 不使用）未修——该通路不在平台热路径上，纪律保留在
+`BENCHMARK.md` 第 4 处退化里。第 2 处这个「转 Accepted 的最后前置」已消除；是否就此转 Accepted
+只取决于第 4 处这条不适用于本平台的项要不要算数。
 
 ## 相关
 
