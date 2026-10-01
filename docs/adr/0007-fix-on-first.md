@@ -325,6 +325,10 @@ cordis v0.3.0 → **v0.4.0**（5 个提交、+4 159 行）：events/loader/regis
 起来」的直接原因。该接线有两个回归测试（单元守形状与级别过滤，集成守每个分片都真接了线），
 均已用变异验证过各自只翻红对应的一项。
 
+**经 insula v0.2.0 发货**（2026-10-01，annotated tag 指向 `7028654`）：`go install github.com/corecraft-io/insula/cmd/insula@v0.2.0` 在发布图上构建成功（不经 `go.work`），产出的二进制跑 `demo` 九步全绿、退出 0、stderr 零行。下游消费者现在无需 workspace 即可拿到这次适配。
+
+版本号是 **minor 而不是 patch**：同一批提交删除了两个导出方法（`gateway.Breaker.Reset`、`tools.Registry.Names`），属于破坏性变更，在 Go 的 v0.x 惯例下进 minor 位。
+
 **状态维持 Accepted。**
 
 ## 相关
