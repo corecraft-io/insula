@@ -399,8 +399,9 @@ func TestRenderEmitsEveryFamilyForGlobalAndEachTenant(t *testing.T) {
 	out := r.Render()
 	lines := splitLines(out)
 
-	if want := len(renderFamilies) * 3; len(lines) != want {
-		t.Fatalf("输出 %d 行，期望 %d（%d 族 × 全局 + 2 租户）",
+	// 每族 2 行头（# TYPE + # HELP）+ 3 个桶（全局 + tenant-a + tenant-b）样本。
+	if want := len(renderFamilies)*2 + len(renderFamilies)*3; len(lines) != want {
+		t.Fatalf("输出 %d 行，期望 %d（%d 族 × (2 头 + 3 桶)）",
 			len(lines), want, len(renderFamilies))
 	}
 
@@ -435,8 +436,8 @@ func TestRenderEscapesTenantLabels(t *testing.T) {
 	if !hasLine(out, `insula_runs_started{tenant="wo\"rld\nX"} 1`) {
 		t.Fatalf("恶意租户名没有被转义:\n%s", out)
 	}
-	// 换行必须被转义掉：行数只能是「族数 × 桶数」。
-	if want := len(renderFamilies) * 3; len(splitLines(out)) != want {
+	// 换行必须被转义掉：行数只能是「族数 × (2 头 + 桶数)」。
+	if want := len(renderFamilies)*2 + len(renderFamilies)*3; len(splitLines(out)) != want {
 		t.Fatalf("注入的换行把输出撕成了 %d 行，期望 %d 行:\n%s",
 			len(splitLines(out)), want, out)
 	}
@@ -448,9 +449,53 @@ func TestRenderEscapesTenantLabels(t *testing.T) {
 
 func TestRenderOnEmptyRegistryStillEmitsGlobalFamilies(t *testing.T) {
 	out := metrics.New().Render()
-	if want := len(renderFamilies); len(splitLines(out)) != want {
-		t.Fatalf("空注册表输出 %d 行，期望 %d 行（全局桶始终存在）",
+	// 空注册表只有全局桶：每族 2 行头 + 1 行样本。
+	if want := len(renderFamilies)*2 + len(renderFamilies); len(splitLines(out)) != want {
+		t.Fatalf("空注册表输出 %d 行，期望 %d 行（每族 2 头 + 全局桶始终存在）",
 			len(splitLines(out)), want)
+	}
+}
+
+// 每族必须输出一次 # TYPE / # HELP 头，且头要在该族首个样本之前。
+// 这是补掉 demo 自检里点的那个缺口：没有 # TYPE 头的族，按 TYPE 发现的
+// 工具（Prometheus 解析器、Grafana 指标浏览器）会看不到它。
+func TestRenderEmitsTypeAndHelpHeaders(t *testing.T) {
+	out := metrics.New().Render()
+
+	for _, fam := range renderFamilies {
+		typeLine := "# TYPE " + fam + " "
+		helpLine := "# HELP " + fam + " "
+		if !hasLinePrefix(out, typeLine) {
+			t.Errorf("缺少 # TYPE 头: %q", typeLine)
+		}
+		if !hasLinePrefix(out, helpLine) {
+			t.Errorf("缺少 # HELP 头: %q", helpLine)
+		}
+		// 头里声明的类型必须落在 {counter, gauge} 之内。
+		var typ string
+		for _, l := range splitLines(out) {
+			if strings.HasPrefix(l, typeLine) {
+				typ = strings.TrimSpace(strings.TrimPrefix(l, typeLine))
+				break
+			}
+		}
+		if typ != "counter" && typ != "gauge" {
+			t.Errorf("指标 %q 的 # TYPE 值非法: %q", fam, typ)
+		}
+		// 第一个样本必须排在 # TYPE 头之后。
+		typeIdx, sampleIdx := -1, -1
+		for i, l := range splitLines(out) {
+			if typeIdx < 0 && strings.HasPrefix(l, typeLine) {
+				typeIdx = i
+			}
+			if sampleIdx < 0 && strings.HasPrefix(l, fam+"{tenant=") {
+				sampleIdx = i
+				break
+			}
+		}
+		if typeIdx < 0 || sampleIdx < 0 || sampleIdx <= typeIdx {
+			t.Errorf("指标 %q 的样本（行 %d）没有排在 # TYPE 头（行 %d）之后", fam, sampleIdx, typeIdx)
+		}
 	}
 }
 

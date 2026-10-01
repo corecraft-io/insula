@@ -290,37 +290,64 @@ func (r *Registry) Forget(t ident.Tenant) {
 	delete(r.tenants, t)
 }
 
+// renderMetric 描述 /metrics 端点导出的一个指标族。
+// 顺序即导出顺序；# TYPE / # HELP 头按此清单逐族输出一次。
+//
+// 新增一族指标必须在此登记：否则没有 # TYPE 头的族，按类型发现指标族
+// 的工具（Prometheus 文本解析器、Grafana 指标浏览器、按 TYPE 头聚合的
+// 看板）会看不到它——这正是此前 demo 自检里标注的缺口。
+type renderMetric struct {
+	name  string
+	typ   string // counter | gauge
+	help  string
+	value func(s Snapshot) int64
+}
+
+var renderMetrics = []renderMetric{
+	{"insula_runs_started", "counter", "Agent runs started.", func(s Snapshot) int64 { return s.RunsStarted }},
+	{"insula_runs_completed", "counter", "Agent runs completed.", func(s Snapshot) int64 { return s.RunsCompleted }},
+	{"insula_runs_failed", "counter", "Agent runs that ended in failure.", func(s Snapshot) int64 { return s.RunsFailed }},
+	{"insula_runs_rejected", "counter", "Agent runs rejected by admission control.", func(s Snapshot) int64 { return s.RunsRejected }},
+	{"insula_tools_called", "counter", "Tool invocations.", func(s Snapshot) int64 { return s.ToolsCalled }},
+	{"insula_tools_denied", "counter", "Tool invocations denied.", func(s Snapshot) int64 { return s.ToolsDenied }},
+	{"insula_tokens_in", "counter", "Input tokens observed.", func(s Snapshot) int64 { return s.TokensIn }},
+	{"insula_tokens_out", "counter", "Output tokens observed.", func(s Snapshot) int64 { return s.TokensOut }},
+	{"insula_isolation_checks", "counter", "Isolation self-checks performed.", func(s Snapshot) int64 { return s.IsolationChecks }},
+	{"insula_isolation_breaches", "counter", "Isolation self-check breaches; must stay 0.", func(s Snapshot) int64 { return s.IsolationBreaches }},
+	{"insula_run_latency_p95_millis", "gauge", "95th percentile run latency in milliseconds.", func(s Snapshot) int64 { return s.LatencyP95.Milliseconds() }},
+	{"insula_run_latency_p99_millis", "gauge", "99th percentile run latency in milliseconds.", func(s Snapshot) int64 { return s.LatencyP99.Milliseconds() }},
+}
+
 // Render 输出 Prometheus 文本格式，供 /metrics 端点使用。
+//
+// 每个指标族输出一次 # TYPE / # HELP 头，紧跟着该族的全体样本（全局桶 + 各租户桶），
+// 整族连续——这是 exposition 格式的标准形态，也让按 TYPE 头做指标发现的工具能正确识别。
+// 缺失 # TYPE 头的族会被解析器按 untyped 处理、从指标族列表里消失，故每族都必须有头。
 func (r *Registry) Render() string {
 	var b []byte
-	appendCounters := func(label string, c *Counters) {
-		s := c.Snapshot(ident.Tenant(label))
-		b = append(b, fmt.Sprintf("insula_runs_started{tenant=%q} %d\n", label, s.RunsStarted)...)
-		b = append(b, fmt.Sprintf("insula_runs_completed{tenant=%q} %d\n", label, s.RunsCompleted)...)
-		b = append(b, fmt.Sprintf("insula_runs_failed{tenant=%q} %d\n", label, s.RunsFailed)...)
-		b = append(b, fmt.Sprintf("insula_runs_rejected{tenant=%q} %d\n", label, s.RunsRejected)...)
-		b = append(b, fmt.Sprintf("insula_tools_called{tenant=%q} %d\n", label, s.ToolsCalled)...)
-		b = append(b, fmt.Sprintf("insula_tools_denied{tenant=%q} %d\n", label, s.ToolsDenied)...)
-		b = append(b, fmt.Sprintf("insula_tokens_in{tenant=%q} %d\n", label, s.TokensIn)...)
-		b = append(b, fmt.Sprintf("insula_tokens_out{tenant=%q} %d\n", label, s.TokensOut)...)
-		// checks 与 breaches 必须成对导出。只导出 breaches 的话，
-		// 「查过且干净」与「自检根本没跑起来」在监控上都是 0，
-		// 于是针对 breaches 的告警会在这两件事之间失去分辨力——
-		// 而"自检悄悄停了"正是它最该报警的情形。
-		b = append(b, fmt.Sprintf("insula_isolation_checks{tenant=%q} %d\n", label, s.IsolationChecks)...)
-		b = append(b, fmt.Sprintf("insula_isolation_breaches{tenant=%q} %d\n", label, s.IsolationBreaches)...)
-		b = append(b, fmt.Sprintf("insula_run_latency_p95_millis{tenant=%q} %d\n",
-			label, s.LatencyP95.Milliseconds())...)
-		b = append(b, fmt.Sprintf("insula_run_latency_p99_millis{tenant=%q} %d\n",
-			label, s.LatencyP99.Milliseconds())...)
-	}
-	appendCounters("", r.global)
-	for _, t := range r.Tenants() {
+	global := r.global.Snapshot(ident.Tenant(""))
+	tenants := r.Tenants()
+	rows := make([]struct {
+		label string
+		s     Snapshot
+	}, 0, len(tenants))
+	for _, t := range tenants {
 		c, ok := r.counters(t)
 		if !ok {
 			continue
 		}
-		appendCounters(t.String(), c)
+		rows = append(rows, struct {
+			label string
+			s     Snapshot
+		}{t.String(), c.Snapshot(ident.Tenant(t.String()))})
+	}
+	for _, m := range renderMetrics {
+		b = append(b, "# TYPE "+m.name+" "+m.typ+"\n"...)
+		b = append(b, "# HELP "+m.name+" "+m.help+"\n"...)
+		b = append(b, fmt.Sprintf("%s{tenant=%q} %d\n", m.name, "", m.value(global))...)
+		for _, row := range rows {
+			b = append(b, fmt.Sprintf("%s{tenant=%q} %d\n", m.name, row.label, m.value(row.s))...)
+		}
 	}
 	return string(b)
 }
