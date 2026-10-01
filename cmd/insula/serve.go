@@ -130,6 +130,27 @@ func startAdmin(addr string, svc *insula.Service, stderr io.Writer) (*http.Serve
 				"把它暴露到网络上是信息泄漏。\n", addr)
 	}
 
+	mux := adminMux(svc)
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("监听运维面 %s: %w", addr, err)
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	return srv, nil
+}
+
+// adminMux 装配运维面的路由。
+//
+// 它与 startAdmin 分开，是因为这两个 handler 的行为必须被钉住，而
+// startAdmin 剩下的部分（监听、启动、关停）在单元测试里断言不了：
+//
+//   - /healthz 在平台已停机时必须返回 503 而不是 200——负载均衡器靠
+//     这个状态码摘流量，返回 200 会让请求继续打到正在拆的池上。
+//   - /metrics 的 Content-Type 必须带 version=0.0.4，Prometheus 解析器
+//     据此选择文本协商格式（少了它仍能读，但会走 deprecated 路径）。
+func adminMux(svc *insula.Service) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -144,14 +165,7 @@ func startAdmin(addr string, svc *insula.Service, stderr io.Writer) (*http.Serve
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		io.WriteString(w, svc.Metrics().Render())
 	})
-
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("监听运维面 %s: %w", addr, err)
-	}
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	go func() { _ = srv.Serve(ln) }()
-	return srv, nil
+	return mux
 }
 
 // warnTo 把 OnWarn 接到 stderr。
