@@ -52,7 +52,7 @@ N 个 `cordis.App`（建议 4–8），租户按 `hash(tenantID) % N` **粘性**
 
 想穷尽就把 `Config.SelfCheckPairs` 调大，报告里的 `Exhaustive` 会告诉你这次覆没覆盖全。两个如实记录的限制：
 
-1. **`PairsChecked == 0` 是歧义的。** 分片数多于租户数时没有哪片里有两个租户，于是没有任何可比对的对；但「自检压根没跑」也报 0。`Pool.Checked()` 累计的是**比较过的对数**，不是调用次数，因此分辨不了这两种情况。要分辨得另加一个调用计数器。
+1. **`PairsChecked == 0` 是歧义的。** 分片数多于租户数时没有哪片里有两个租户，于是没有任何可比对的对；但「自检压根没跑」也报 0。`Pool.Checked()` 累计的是**比较过的对数**，不是调用次数，因此分辨不了这两种情况。要分辨得另加一个调用计数器。（*该歧义已于 2026-10-01 解决，见下方「更新」——`SelfCheckReport` 新增 `Calls` 字段，`Pool` 新增累计 `calls` 计数器与 `Calls()` 访问器。*）
 2. **跨分片那部分是哨兵比对**，各取一个租户。它对片内破坏不敏感，只抓「两片意外共用了同一个 App」这类装配错误。
 
 详见 `SAFETY.md` 的「本仓库不做什么」。
@@ -64,6 +64,13 @@ N 个 `cordis.App`（建议 4–8），租户按 `hash(tenantID) % N` **粘性**
 - `Reflect.index` 改为按隔离域分桶后，单次服务通知的代价不再正比于「全部域的订阅者」。实测见 `BENCHMARK.md` 门禁四：R=10000 时从 1 975 µs 降到 72 µs。
 - 分片仍然必要：`App.Wait()` 的 O(全部 fiber) 扫描、`Loader.Resolve` 的 `g.children` 线性扫描、`Runtime.remove` 的 slice splice 都还在（`BENCHMARK.md` 里第 1、2、5 处退化）。
 - 分片数的**理由**因此变得更清晰了：它不是为了掩盖索引的键设计错误，而是为了让「每片的总 fiber 数」和「每片的 root children 数」有上界。
+
+**2026-10-01** —— 限制 #1（`PairsChecked == 0` 歧义）已解决：
+
+- `SelfCheckReport` 新增 `Calls int` 字段：每次 `SelfCheck` 进入正常执行路径即记 1（池已关闭等早退路径记 0）。它与 `PairsChecked`（累计比较过的对数）分开计。
+- `Pool` 新增累计 `calls atomic.Int64` 字段与 `Calls() int64` 访问器，与既有的 `checked`/`Checked()`（累计对数）平行。
+- 现在 `PairsChecked == 0` 不再歧义：`Calls == 0` 表示「没跑」，`Calls > 0` 表示「跑了但无对可比」（分片数 > 同片租户数时的正常状态）。`cmd/insula/demo` 第 7 步据此把三种状态分开打印，不再依赖跨查 metrics。
+- 测试新增 `TestSelfCheckCallsDisambiguatesNoPairsFromNotRun` 锁死该区分；`TestSelfCheckWithTooFewTenants` / `TestSelfCheckPassesForProvisionedPool` 补了 `Calls` 断言。
 
 ## 相关
 

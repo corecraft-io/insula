@@ -166,8 +166,10 @@ realm label (`"@shared"`) is expressible even though the platform never emits
 one — and `cordis` honours it silently. The answer there is a **sentinel**, not
 a guarantee: `shard.Pool.SelfCheck` is the designated place where construction
 breakage is caught (see SAFETY.md R3), and a sentinel must report what it
-scanned — `SelfCheckReport.PairsChecked` and `.Declarations` — so that "ran and
-was clean" cannot be confused with "did not run".
+scanned — `SelfCheckReport.PairsChecked`, `.Declarations`, and `.Calls` — so
+that "ran and was clean" cannot be confused with "did not run". `Calls` is the
+invocation counter that disambiguates "ran but had no pairs to compare" from
+"did not run at all" (the latter leaves `Calls == 0`); see ADR-0002.
 
 ## Testing discipline
 

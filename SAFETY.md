@@ -129,15 +129,17 @@ Stated plainly, so that nobody discovers it in production:
 - **No certificate/mTLS, no rate limiting by source IP, no WAF.** `edge` does
   bearer authentication, per-tenant admission, and body-size caps. Everything
   upstream of that is yours.
-- **Metrics output has no `# HELP` / `# TYPE` headers.** `metrics.Registry.Render`
-  emits bare sample lines. The format is valid (a missing `TYPE` means `untyped`),
-  but tooling that discovers metric families by parsing `# TYPE` will see zero
-  families.
+- **Metrics output has no `# HELP` / `# TYPE` headers.** *Resolved 2026-10-01:*
+  `metrics.Registry.Render` now emits a `# TYPE` and `# HELP` header per family
+  (see `renderMetrics` in `metrics/metrics.go`), so family-discovery tooling sees
+  every family.
 - **Isolation self-check granularity.** `shard.SelfCheck` compares tenant pairs
   that actually co-reside in a shard. With more shards than tenants no shard has
-  two tenants, so `PairsChecked == 0` and no checks run. `PairsChecked == 0` is
-  therefore ambiguous between "no comparable pairs" and "the self-check did not
-  run"; distinguishing those needs a separate invocation counter.
+  two tenants, so `PairsChecked == 0` and no checks run. This used to be ambiguous
+  with "the self-check did not run"; *resolved 2026-10-01:* `SelfCheckReport.Calls`
+  (and the cumulative `Pool.Calls()`) now disambiguates "ran but no pairs" from
+  "did not run" — `Calls == 0` means it did not run (e.g. pool closed),
+  `Calls > 0` means it ran but had nothing to compare. See ADR-0002 §「更新」.
 
 ## Reporting a vulnerability
 
