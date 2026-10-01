@@ -106,6 +106,10 @@ live heap, but it allocates nothing inside the timed window, so no collection is
 triggered there and no assist is charged. It is the only gate whose old numbers
 survive.
 
+> The "now" column above is the **2026-09-29** reading. On 2026-09-30 degradation
+> #5 was fixed insula-side, and gate 1 now reads **19 297 ns/tenant** at N=10000
+> under exactly this recipe — see Gate 1. The other two rows are unaffected.
+
 `BenchmarkWaitScan` and `BenchmarkEventFanout` both use snapshot-style
 measurement: they pin `b.N = 1`, do their own internal repeat count, and report
 via `ReportMetric`. The metric definition is a per-snapshot average, so
@@ -168,15 +172,22 @@ batch).
 
 | N | ns/tenant | B/op per tenant | allocs per tenant |
 | --- | --- | --- | --- |
-| 100 | 27 209 | 40.6 KB | 628.8 |
-| 1 000 | 17 620 | 40.1 KB | 626.5 |
-| 10 000 | 27 818 | 40.7 KB | 626.3 |
+| 100 | 28 731 | 40.7 KB | 630.1 |
+| 1 000 | 17 088 | 40.3 KB | 628.4 |
+| 10 000 | 19 297 | 40.9 KB | 628.3 |
 
 The gate is `ns/tenant`, and it must not grow with N. From N=1000 to N=10000 it
-grows **1.58×** across a 10× scale increase, which fits ≈ N^1.20 in total time.
-`allocs/tenant` is flat at ~627 and `B/op` flat at ~40.7 KB — the cleaner
-signals, and both **unchanged** from the pre-2026-09-29 reads. That is what makes
-the comparison legitimate: the work never moved, only the time.
+grows **1.13×** across a 10× scale increase, which fits ≈ N^1.05 in total time.
+`allocs/tenant` is flat at ~628 and `B/op` flat at ~40.9 KB — the cleaner
+signals, and both within a fraction of a percent of the pre-fix reads. That is
+what makes the before/after comparison legitimate: the work never moved, only
+the time.
+
+These three rows were retaken on **2026-09-30** after degradation #5 was fixed
+(see below). Under the identical recipe they replace the 2026-09-29 readings of
+29 854 / 17 143 / 27 549 ns/tenant, whose 1.61× spread across the same scale is
+what fitted ≈ N^1.21. The N=1000 row barely moved — which is the prediction: at
+that size the scan being removed was below one profile sample.
 
 N=100 reads *higher* per tenant than N=1000 (27.2 µs vs 17.6 µs) and is the
 noisiest row in this file (24.2–38.3 µs, 58% spread). That is fixed per-batch
@@ -184,12 +195,12 @@ cost — one `DoSync` plus one `Wait()` for the whole batch — amortised over o
 100 tenants. Read this gate as "does it grow with N", and use the upper two rows
 to answer it.
 
-### The residual is insula's own call site
+### The residual was insula's own call site — fixed 2026-09-30
 
-One profile at `N=10000` names it. `cordis.(*EntryTree).Resolve` was **5.22%** of
+One profile at `N=10000` named it. `cordis.(*EntryTree).Resolve` was **5.22%** of
 all samples, 57.89% of that inside `runtime.memequal`, and **100% of its callers
 were `tenant.(*Manager).verifyAssembly`**. At `N=1000`, at matched total work, the
-same frame does not reach a single sample.
+same frame did not reach a single sample.
 
 The mechanism is one line of insula code:
 
@@ -200,7 +211,7 @@ e, err := m.d.Loader.Tree().Resolve(t.EntryID)
 
 `Resolve` walks the path segment by segment and at each level scans that group's
 children linearly (`loader.go:538-562`). A tenant is a **direct child of the
-root**, so resolving one tenant scans all N of them. `Provision` resolves every
+root**, so resolving one tenant scans all N of them. `Provision` resolved every
 tenant it just created ⇒ **O(N²) per batch, on the provisioning path.** At the
 design's own shard size of 2 000 tenants that is ~2 µs/tenant of a ~9 µs/tenant
 operation.
@@ -226,6 +237,53 @@ held `*Entry` is a claim about the tree as it was when it was created, so the
 "someone removed it behind our back" case has to be re-argued rather than
 inherited. That belongs in a test, not in a benchmark.
 
+**Done, 2026-09-30**, in `tenant.(*Manager).verifyAssembly`. Two departures from
+the sketch above are worth recording:
+
+- The map is built from `Root().Children()` rather than from the `*Entry` that
+  `Create` returned. Keeping the returned pointer would also cut the scan, but it
+  would make the check read a possibly-stale object: after someone removes the
+  subtree behind our back, the held `*Entry` still answers `Subgroup() != nil`
+  and **passes** the check. Building from the snapshot inherits the old semantics
+  instead — "not in the current root group" reads exactly like the
+  `ErrEntryNotFound` the old `Resolve` branch used to produce.
+- Missing entries therefore still fail loudly as `ErrShortAssembly`.
+
+Measured effect, same recipe as the table above (`GOGC=off`, `1x`, `-count 5`,
+`-cpu 4`, median of 5):
+
+| N | before | after | improvement |
+| --- | --- | --- | --- |
+| 100 | 29 854 | 28 731 | 1.04× |
+| 1 000 | 17 143 | 17 088 | 1.00× |
+| 10 000 | 27 549 | 19 297 | **1.43×** |
+
+The shape is the point, not the constant: the N=1000 row is noise-level, exactly
+as the profile predicted, while N=10000 drops 30%. Cross-scale spread went from
+1.61× to **1.13×** — 10× more tenants now costs 13% more per tenant instead of
+61%.
+
+A matched-work profile pair confirms the attribution (`-benchtime 5x` at N=10000,
+`GOGC=off`, `-cpu 4`). Read it with the usual caveat that these percentages span
+the whole run including the `StopTimer` cleanup region, so they are not the same
+figures as the 5.22% above:
+
+| frame | before | after |
+| --- | --- | --- |
+| `cordis.(*EntryTree).Resolve` | cum 8.61%, flat 0.75% | **below one sample** |
+| `tenant.(*Manager).verifyAssembly` | cum 9.36% | **below one sample** |
+| `cordis.(*EntryTree).Remove` (cleanup path) | cum 14.98% | cum 17.41% |
+
+`Remove` did not get slower; it absorbed the share the other two vacated.
+
+The debt noted above is paid in a test, not in a benchmark:
+`TestAssemblyCheckIsEquivalentToResolve` pins the three facts the substitution
+rests on — `Children()` yields the same `*Entry` pointers `Resolve` would return,
+tenant entries are single-segment direct children of the root, and duplicate IDs
+resolve to the first one in configuration order. The reason it exists is that a silent change in
+cordis would make the map point at the wrong object while provisioning kept
+succeeding.
+
 ### What this used to be
 
 Before 2026-09-27, provisioning was **quadratic**:
@@ -236,11 +294,14 @@ Before 2026-09-27, provisioning was **quadratic**:
 | 1 000 | 285 324 | 17 620 | 16× |
 | 10 000 | 8 197 214 (82 s, 4.5 GB) | 27 818 | **295×** |
 
+(The "now" column here was taken on 2026-09-29; after degradation #5 was fixed on
+2026-09-30 the same recipe reads 19 297 ns/tenant — see Gate 1.)
+
 The cause was `cordis.Reflect.index` being bucketed by service *name* instead of
 by isolate *realm*, so "who needs notifying" cost one pass over every realm's
 subscribers. At N=10000 that single call (`candidates`) was **90.36%** of the
 profile. Fixed in cordis by making the index key isomorphic to the store key; see
-`AGENTS.md` for the invariant. The measured spread is now 1.58× across the upper
+`AGENTS.md` for the invariant. The measured spread is now 1.13× across the upper
 10× of scale instead of 96×.
 
 ## Gate 2 — teardown must not go quadratic
@@ -264,8 +325,10 @@ The two upper rows agree across both CPUs to within 3% (7 797 / 18 434 at
 `-cpu 1`), which is the part of the curve the gate is actually about.
 
 The design's gate is phrased as: the N=1000 → N=10000 ratio should be ~10, not
-~100. Measured **23.4×** — an exponent of **≈1.37** in total time, against ≈1.20
-for provisioning over the same interval.
+~100. Measured **23.4×** — an exponent of **≈1.37** in total time, against ≈1.05
+for provisioning over the same interval (down from ≈1.21 before degradation #5
+was fixed on 2026-09-30). Teardown is now the steeper of the two by a wide
+margin; that is what ADR-0007's next step points at.
 
 So: super-linear, but nowhere near quadratic. And "teardown is slower than
 provisioning" is a conclusion rather than a defect — it buys a single `Remove`
@@ -486,7 +549,7 @@ The design listed five. Current status, measured:
 | 2 | `registry.go` `Runtime.remove` / `deleteRuntime` — slice splice | **Confirmed, and it is Gate 2's exponent.** `Runtime` is keyed by `*Plugin`, so its `fibers` slice holds *every instance of that plugin in the whole App*; `remove` scans it and splices the tail, 92.59% of the frame being `runtime.typedslicecopy`. Share of a profile at matched total work: 0.5% at N=1000, 7.42% at N=10000. Not fixed |
 | 3 | `reflect.go` `untrack` — slice splice in the inverted index | **Structurally bounded.** The realm bucketing means a tenant-private service's bucket holds only that tenant's subscribers. A platform-wide service in the default realm still has one large bucket. Fixed 2026-09-27 along with the key change. Note that the pre-fix quadratic was *not* `untrack`'s splice but `candidates` scanning every realm's bucket — same index, different function, and the design named the wrong one |
 | 4 | `events.go` `hooksOf` / `EmitFiltered` — copy all listeners, then filter | **Open.** Separate path from `Reflect`; insula does not use it, so it is not on the platform's hot path. A platform that does use cordis events at tenant scale must namespace event names |
-| 5 | `loader.go` `Resolve` — linear scan of `g.children` | **Open, and measured on insula's own provisioning path.** `Manager.verifyAssembly` calls `Resolve` once per tenant, and tenants are direct children of the root, so each call scans all N. 5.22% of one profile at N=10000, below one sample at N=1000. This is Gate 1's ≈1.20 exponent, and the fix is insula-side — see Gate 1 |
+| 5 | `loader.go` `Resolve` — linear scan of `g.children` | **Fixed 2026-09-30, insula-side.** It was measured on insula's own provisioning path: `Manager.verifyAssembly` called `Resolve` once per tenant, and tenants are direct children of the root, so each call scanned all N — 5.22% of one profile at N=10000, below one sample at N=1000, and Gate 1's ≈1.21 exponent. `verifyAssembly` now builds one `Root().Children()` → `*Entry` map per batch instead. N=10000 went 27 549 → 19 297 ns/tenant and the cross-scale spread 1.61× → 1.13×. The cordis function itself is untouched, so any caller outside insula still pays it — see Gate 1 |
 
 ## A caveat about this file
 

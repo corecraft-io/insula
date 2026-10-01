@@ -146,6 +146,54 @@ N 个。`createEntries` 本来就把 `Create` 返回的 `*Entry` 丢掉了，而
 
 验收条件不变：五处退化都有界或被修。现在其中两处有实测份额、有调用者、有已确认的机制。
 
+### 2026-09-30 —— 第 5 处已修
+
+09-29 那次调序（先做第 5 处而不是第 2 处）已经执行完毕。**第 5 处退化的修复落在
+insula 侧**，位置 `tenant.(*Manager).verifyAssembly`：原先每租户调一次
+`Tree().Resolve`，现在改为每批建一张 `Root().Children()` → `*Entry` 映射后查表。
+
+与 09-29 段末那句建议有一处不同，写下来以免下次读的人以为忘了：
+
+> 那句建议的原话是「`createEntries` 本来就把 `Create` 返回的 `*Entry` 丢掉了……
+> 攥住它即可」。实际没有攥那个返回值，而是从 `Root().Children()` 建表。
+
+理由就是这条修法里唯一不免费的那部分：**攥住的 `*Entry` 是「创建那一刻的树」
+的断言**。若有人在我们背后摘掉这棵子树（并发 `Ensure` / `Deprovision` 撞在同一短 ID 上），
+那个指针照样答得出 `Subgroup() != nil`，于是装配校验**放行**，一个已不存在的租户会被登记
+为可用。改用当前根子节点的快照，则「查不到」精确继承旧 `Resolve` 报 `ErrEntryNotFound`
+的语义——依然是响亮失败的 `ErrShortAssembly`，不用重新论证。
+
+实测（`GOGC=off`、`1x`、`-count 5`、`-cpu 4`，5 次中位，完整口径见 `BENCHMARK.md` 门禁一）：
+
+| N | 修复前 | 修复后 | 改善 |
+| --- | --- | --- | --- |
+| 100 | 29 854 | 28 731 | 1.04× |
+| 1 000 | 17 143 | 17 088 | 1.00× |
+| 10 000 | 27 549 | 19 297 | **1.43×** |
+
+1000 → 10000 的比值 **1.61× → 1.13×**，即总耗时指数 **≈N^1.21 → ≈N^1.05**。配平工作量的
+一对剖面（`-benchtime 5x`、N=10000）里，`EntryTree.Resolve` 与 `verifyAssembly` 双双跌到
+不足一个采样（修复前 cum 8.61% / 9.36%），腾出的份额被清理路径的 `EntryTree.Remove` 吸收。
+
+有三样东西为这次替换兜底：
+
+1. `TestAssemblyCheckIsEquivalentToResolve`（新建）钉住「快照里的 `*Entry` 就是 `Resolve`
+   会给的那个」三个支点：同一指针、单段直接子节点、重复 ID 取配置序第一个。**这条测试守的
+   是 cordis 的语义承诺，不是这次改动本身**——它要让 cordis 侧的静默变更先炸在测试里。
+2. 既有的 `TestProvisionDetectsSilentlySkippedChildEntry` 继续守住那条唯一的失败路径：
+   装配不完整 ⇒ `ErrShortAssembly` ⇒ 回滚。变异验证做过了：把映射的键改坏，tenant 包立刻
+   有 4 条以上测试变红，且 warn 明确指向新分支。
+3. `allocs/租户`（~628）与 `B/租户`（~40.9 KB）基本未动 —— 前后读数可比的前提成立：
+   工作量没变，只有时间变了。
+
+**状态：仍是 Proposed。** 验收条件是「五处退化都有界或被修」，现在第 1、3 处有界，第 5 处
+已修，剩下第 2 处（`Runtime.remove` 的 slice splice，注销指数 ≈1.37）与第 4 处
+（cordis 事件 `hooksOf`，insula 不用）未修。第 2 处要改 cordis 本体。
+
+下一步：按 09-29 段的排序，第 2 处是剩下的唯一 insula 之外的阻塞项。它现在是**注销**这条
+路径上唯一的超线性来源，也是本 ADR 转 Accepted 的前置——建议在 cordis 侧开工时连带把
+「`Runtime` 是否应该继续按 `*Plugin` 键」这个问题一并论证。
+
 ## 相关
 
 - [ADR-0001](0001-cordis-is-the-control-plane.md) —— 本条的代价来源。
